@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.env
+
+# Parallax runtime state: caches, trained models, run transcripts, audit log.
+# Memory and reports are deliberately NOT ignored — they are the durable output.
+.parallax/cache/
+.parallax/models/
+.parallax/runs/
+.parallax/safety-audit.jsonl
+
+# IDE
+.idea/
+.vscode/
+.DS_Store

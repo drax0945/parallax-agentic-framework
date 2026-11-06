@@ -1,0 +1,96 @@
+{
+  "updated": "2026-11-06T17:16:12+00:00",
+  "count": 5,
+  "entries": [
+    {
+      "id": "20261106-lorlatinib-achieves-pic50-8-05-on-alk-wi-4578",
+      "type": "finding",
+      "title": "Lorlatinib achieves pIC50 8.05 on ALK with zero rotatable bonds via 12-membered macrolactam",
+      "tags": [
+        "alk",
+        "lorlatinib",
+        "macrocycle",
+        "potency",
+        "cns"
+      ],
+      "confidence": 0.85,
+      "support": 1,
+      "contradictions": 0,
+      "uses": 0,
+      "updated": "2026-11-06T17:16:12+00:00",
+      "superseded_by": null,
+      "n_citations": 4
+    },
+    {
+      "id": "20261106-crizotinib-macrocyclisation-13-ring-desi-9ebf",
+      "type": "finding",
+      "title": "Crizotinib macrocyclisation: 13-ring design removes 5 rotatable bonds",
+      "tags": [
+        "alk",
+        "macrocycle",
+        "design",
+        "crizotinib"
+      ],
+      "confidence": 0.55,
+      "support": 1,
+      "contradictions": 0,
+      "uses": 1,
+      "updated": "2026-11-06T17:08:54+00:00",
+      "superseded_by": null,
+      "n_citations": 5
+    },
+    {
+      "id": "20261106-qsar-model-for-alk-tyrosine-kinase-recep-5d35",
+      "type": "model",
+      "title": "QSAR model for ALK tyrosine kinase receptor (pIC50 (biochemical inhibition))",
+      "tags": [
+        "model",
+        "qsar",
+        "inhibition",
+        "chembl4247"
+      ],
+      "confidence": 0.8,
+      "support": 1,
+      "contradictions": 0,
+      "uses": 1,
+      "updated": "2026-11-06T17:05:17+00:00",
+      "superseded_by": null,
+      "n_citations": 30
+    },
+    {
+      "id": "20261106-macrocyclisation-of-alk-inhibitors-cuts--649d",
+      "type": "heuristic",
+      "title": "Macrocyclisation of ALK inhibitors cuts rotatable bonds and raises potency",
+      "tags": [
+        "alk",
+        "macrocycle",
+        "potency",
+        "kinase"
+      ],
+      "confidence": 0.8375,
+      "support": 2,
+      "contradictions": 0,
+      "uses": 3,
+      "updated": "2026-11-06T16:45:28+00:00",
+      "superseded_by": null,
+      "n_citations": 2
+    },
+    {
+      "id": "20261106-openalex-anonymous-search-is-rate-limite-94eb",
+      "type": "failure",
+      "title": "OpenAlex anonymous search is rate limited",
+      "tags": [
+        "literature",
+        "openalex",
+        "tooling"
+      ],
+      "confidence": 0.45,
+      "support": 1,
+      "contradictions": 1,
+      "uses": 3,
+      "updated": "2026-11-06T16:45:28+00:00",
+      "superseded_by": null,
+      "n_citations": 0
+    }
+  ]
+}

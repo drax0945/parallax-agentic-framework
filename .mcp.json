@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "parallax": {
+      "command": "parallax",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}
