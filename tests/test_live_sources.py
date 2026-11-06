@@ -85,9 +85,18 @@ def test_measured_properties_carry_references():
 
 @pytest.mark.slow
 def test_model_training_beats_the_mean_baseline():
+    """Trains under a reserved name so it cannot overwrite a real workspace model."""
+    from parallax.config import settings
     from parallax.models import predict, train
 
-    result = train("CHEMBL4247", endpoint="inhibition", split="scaffold", max_records=1200)
+    test_model = "pytest_tmp_chembl4247_inhibition"
+    result = train(
+        "CHEMBL4247",
+        endpoint="inhibition",
+        split="scaffold",
+        max_records=1200,
+        name=test_model,
+    )
     card = result["card"]
     assert card["n_compounds"] >= 100
     assert card["metrics"]["rmse"] < card["baseline_metrics"]["rmse"]
@@ -98,3 +107,7 @@ def test_model_training_beats_the_mean_baseline():
     assert 5 < first["predicted_value"] < 12
     assert first["applicability_domain"]["verdict"]
     assert first["uncertainty_log_units"] > 0
+
+    # Leave the workspace as we found it.
+    for suffix in (".pkl", ".card.json"):
+        (settings().models_dir / f"{test_model}{suffix}").unlink(missing_ok=True)

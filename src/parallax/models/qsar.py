@@ -583,6 +583,33 @@ def predict(
     model = payload["model"]
     queries = [smiles] if isinstance(smiles, str) else list(smiles)
 
+    # Re-register the model as a citable source in *this* session. Without this a
+    # prediction hands back a citation key that nothing can resolve, which is the
+    # same failure as citing a paper you never retrieved.
+    registry().add(
+        Citation(
+            key=f"model:{card.name}",
+            kind="model",
+            title=(
+                f"Parallax QSAR model '{card.name}' — {card.endpoint_label} for "
+                f"{card.target_name or card.target_chembl_id}"
+            ),
+            source_db="parallax",
+            year=int(card.created[:4]) if card.created[:4].isdigit() else None,
+            note=(
+                f"{card.algorithm} on {card.n_compounds} compounds from "
+                f"{card.source_documents} ChEMBL source documents; {card.split}-split test "
+                f"R²={card.metrics.get('r2')}, RMSE={card.metrics.get('rmse')} log units. "
+                f"Trained {card.created}."
+            ),
+            identifiers={
+                "target_chembl_id": card.target_chembl_id,
+                "endpoint": card.endpoint,
+                "training_citations": card.citations[:200],
+            },
+        )
+    )
+
     X, kept = featurize(queries)
     results: list[dict[str, Any]] = []
     fingerprints = _fingerprints(queries)
