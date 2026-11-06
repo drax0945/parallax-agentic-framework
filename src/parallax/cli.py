@@ -750,8 +750,10 @@ def init(
                 {
                     "mcpServers": {
                         "parallax": {
-                            "command": "parallax",
-                            "args": ["mcp"],
+                            # `uv run` resolves the project venv from the cwd, so this
+                            # works without the venv being active or on PATH.
+                            "command": "uv",
+                            "args": ["run", "parallax", "mcp"],
                         }
                     }
                 },

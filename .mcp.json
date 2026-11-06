@@ -1,10 +1,8 @@
 {
   "mcpServers": {
     "parallax": {
-      "command": "parallax",
-      "args": [
-        "mcp"
-      ]
+      "command": "uv",
+      "args": ["run", "parallax", "mcp"]
     }
   }
 }
