@@ -61,7 +61,7 @@ are all free and keyless.
 
 ---
 
-## Two ways to use it
+## Four ways to use it
 
 ### The agent
 
@@ -75,11 +75,14 @@ calls the tools, and reports with a bibliography. Runs are saved to `.parallax/r
 
 ### Inside Claude Code or the desktop app
 
-`parallax init` writes `.mcp.json`, so the 41 tools appear in any MCP client:
+`parallax init` writes `.mcp.json`, so the 46 tools appear in any MCP client:
 
 ```json
-{ "mcpServers": { "parallax": { "command": "parallax", "args": ["mcp"] } } }
+{ "mcpServers": { "parallax": { "command": "uv", "args": ["run", "parallax", "mcp"] } } }
 ```
+
+`uv run` resolves the project venv from the working directory, so the server starts
+without the venv being active or `parallax` being on your PATH.
 
 The skills in `.claude/skills/` load automatically in the same workspace, so you get the
 same behaviour with your normal agent.
@@ -100,6 +103,30 @@ parallax lit "lorlatinib brain penetration" --since 2015
 parallax cite --verify
 parallax memory recall "ALK macrocycle"
 ```
+
+### As a Python library, for batch work
+
+No agent and no model involved — the chemistry, data and provenance layers import directly.
+Results compose into pandas, the citation registry accumulates across calls, and
+structures render inline in Jupyter via `parallax.chem.svg()`.
+
+```python
+from parallax.chem import resolve
+from parallax.chem.analogs import suggest_macrocyclization
+from parallax.models import predict
+from parallax.sources import chembl
+from parallax.provenance import registry
+
+lead = resolve("crizotinib")
+data = chembl.activities(target_chembl_id="CHEMBL4247", standard_type="IC50", limit=500)
+designs = suggest_macrocyclization(lead.smiles, max_designs=10)["designs"]
+scored = predict("chembl4247_inhibition", [d["smiles"] for d in designs])
+
+print(len(registry()), "sources cited so far")
+```
+
+This is the right mode for scoring a library, running a nightly job, or anything
+reproducible: it is deterministic and needs no Claude access at all.
 
 ---
 
@@ -294,14 +321,30 @@ src/parallax/
   safety.py        structural + intent screening, audit log
   report.py        standalone HTML reports
   cli.py           the command line
-  chem/            structure, descriptors, reactions, retro, analogs
+  chem/            structure, descriptors, reactions, retro, analogs, optimisation
   sources/         pubchem, chembl, europepmc, crossref, openalex, patents, reaxys, nci
   models/          QSAR with scaffold/time splits, applicability domain, model cards
   memory/          the continual-learning store
-  agent/           tools (41), skills loader, prompts, session loop, MCP server
-.claude/skills/    10 workflow skills
-tests/            108 tests (`-m network` for the live ones)
+  agent/           tools (46), skills loader, prompts, session loop, MCP server
+.claude/skills/    11 workflow skills
+tests/            110 tests (`-m network` for the live ones)
 ```
+
+The 11 skills, which are plain markdown you can read and edit:
+
+| Skill | Covers |
+|---|---|
+| `compound-dossier` | profiling a compound end to end |
+| `property-prediction` | the three tiers, developability, liabilities |
+| `potency-modelling` | building and trusting a QSAR model |
+| `sar-mining` | assembling a cited dataset from literature and patents |
+| `analog-design` | bioisosteres, rigidification, macrocyclisation |
+| `lead-optimisation` | selectivity, multi-parameter choice, what to make next |
+| `synthesis-planning` | routes, conditions, precedent, the weakest step |
+| `route-variation` | generating and comparing alternative strategies |
+| `feasibility-review` | can it be made, and what dominates the difficulty |
+| `citation-integrity` | verifying references before delivery |
+| `memory-curation` | what to remember, and how to correct it |
 
 ## Tests
 
