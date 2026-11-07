@@ -122,13 +122,39 @@ risk, ester plasma instability) each paired with *the experiment that would sett
 Macrocycles are handled correctly: the tool says so when Ro5 and Veber cut-offs stop
 being predictive, instead of calling a macrocyclic drug non-drug-like.
 
+### Selectivity and multi-parameter optimisation
+`selectivity_profile` returns measured activity across every target ChEMBL holds for a
+compound, with fold-selectivity against the primary and a flag for anything within
+10-fold — and it says plainly that an untested off-target is absence of testing, not
+evidence of selectivity.
+
+`multiparameter_score` ranks candidates on potency, lipophilicity, size, polarity, HBD,
+synthetic accessibility and structural alerts together, using a weighted geometric mean so
+a hard failure on one objective sinks a candidate rather than being averaged away. Five
+profiles ship — `oral_small_molecule`, `cns`, `lead_like`, `antimicrobial`, `fragment` —
+and the antimicrobial profile deliberately inverts the lipophilicity preference, because
+Gram-negative entry is not oral drug-likeness.
+
+The most useful output is `limiting_objective`: the single property holding each candidate
+back, which tells a chemist what to fix rather than just how it ranked. Validated against
+clinical reality — on the CNS profile lorlatinib scores 0.75 and crizotinib 0.15, which is
+the difference that actually sent lorlatinib into development.
+
+`covalent_check` detects warheads (acrylamide, chloroacetamide, nitrile, boronic acid,
+sulfonyl fluoride and others) and flags that equilibrium IC50 models do not apply to them.
+
 ### Potency and activation prediction
 Models are built when needed, from data pulled live out of ChEMBL — nothing pre-trained
 and opaque.
 
 - **Endpoints are kept distinct**: `inhibition` (IC50, biochemical), `binding` (Ki/Kd),
-  `activation` (EC50, functional response), `cell_potency`, `any_potency`. Activation is
-  a different experiment from inhibition, not the same one relabelled.
+  `activation` (EC50, functional response), `cell_potency`, `antimicrobial` (MIC),
+  `cytotoxicity`, `binding_affinity_relative` (RBA) and `admet`. Activation is a different
+  experiment from inhibition, not the same one relabelled.
+- **Any ChEMBL endpoint can be modelled**, not just the presets: pass `standard_types`
+  explicitly. Values in ug/mL convert to molar pX via molecular weight, which is what makes
+  antibacterial MIC data usable — 251 of 300 *S. aureus* rows are MIC, and relying on
+  ChEMBL's `pchembl_value` alone would have silently excluded the entire field.
 - **Scaffold splits by default**, because random splits flatter congeneric series.
   Chronological splits available when years are present — the closest thing to a
   prospective test.
@@ -274,7 +300,7 @@ src/parallax/
   memory/          the continual-learning store
   agent/           tools (41), skills loader, prompts, session loop, MCP server
 .claude/skills/    10 workflow skills
-tests/             88 tests (`-m network` for the live ones)
+tests/            108 tests (`-m network` for the live ones)
 ```
 
 ## Tests

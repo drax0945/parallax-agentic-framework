@@ -361,11 +361,21 @@ def train_potency_model(
     split: str = "scaffold",
     name: str | None = None,
     max_records: int = 3000,
+    standard_types: list[str] | None = None,
+    assay_type: str | None = None,
 ) -> dict[str, Any]:
     from ..memory import remember
     from ..models import train
 
-    result = train(target, endpoint=endpoint, split=split, name=name, max_records=max_records)
+    result = train(
+        target,
+        endpoint=endpoint,
+        split=split,
+        name=name,
+        max_records=max_records,
+        standard_types=standard_types,
+        assay_type=assay_type,
+    )
     card = result["card"]
     # A model's honest performance is exactly the kind of thing worth remembering.
     try:
@@ -758,6 +768,149 @@ def write_report(
     )
 
 
+
+def selectivity_profile(compound: str, primary_target: str | None = None, limit: int = 400) -> dict[str, Any]:
+    """Measured activity across every target, with selectivity ratios."""
+    from ..sources import chembl
+
+    chembl_id = compound
+    if not compound.upper().startswith("CHEMBL"):
+        found = chembl.search_molecule(compound, limit=1)
+        if not found["results"]:
+            return {"error": f"no ChEMBL compound matched {compound!r}"}
+        chembl_id = found["results"][0]["chembl_id"]
+        name = found["results"][0].get("pref_name") or compound
+    else:
+        name = compound
+
+    result = chembl.activities(molecule_chembl_id=chembl_id, limit=limit)
+    by_target: dict[str, dict[str, Any]] = {}
+    for row in result["rows"]:
+        if row.get("pchembl_value") is None or not row.get("target_name"):
+            continue
+        entry = by_target.setdefault(
+            row["target_name"],
+            {
+                "target": row["target_name"],
+                "target_chembl_id": row.get("target_chembl_id"),
+                "values": [],
+                "assay_types": set(),
+                "citations": set(),
+            },
+        )
+        entry["values"].append(float(row["pchembl_value"]))
+        if row.get("assay_type"):
+            entry["assay_types"].add(row["assay_type"])
+        if row.get("citation"):
+            entry["citations"].add(row["citation"])
+
+    if not by_target:
+        return {
+            "compound": name,
+            "error": "no pChEMBL-quantified activity found for this compound",
+            "advice": "try pubchem_assays for broader screening data",
+        }
+
+    rows = []
+    for entry in by_target.values():
+        values = entry["values"]
+        rows.append(
+            {
+                "target": entry["target"],
+                "target_chembl_id": entry["target_chembl_id"],
+                "best_pchembl": round(max(values), 2),
+                "median_pchembl": round(sorted(values)[len(values) // 2], 2),
+                "n_measurements": len(values),
+                "assay_formats": sorted(entry["assay_types"]),
+                "citations": sorted(entry["citations"])[:5],
+            }
+        )
+    rows.sort(key=lambda r: r["best_pchembl"], reverse=True)
+
+    anchor = rows[0]
+    if primary_target:
+        match = [r for r in rows if primary_target.lower() in (r["target"] or "").lower()
+                 or primary_target.upper() == (r["target_chembl_id"] or "")]
+        if match:
+            anchor = match[0]
+
+    for row in rows:
+        delta = anchor["best_pchembl"] - row["best_pchembl"]
+        row["log_selectivity_vs_primary"] = round(delta, 2)
+        row["fold_selectivity_vs_primary"] = round(10 ** delta, 1) if delta >= 0 else None
+
+    off_targets = [r for r in rows if r["target"] != anchor["target"]]
+    close = [r for r in off_targets if r["log_selectivity_vs_primary"] < 1.0]
+
+    return {
+        "compound": name,
+        "chembl_id": chembl_id,
+        "primary_target": anchor["target"],
+        "primary_pchembl": anchor["best_pchembl"],
+        "n_targets_with_data": len(rows),
+        "targets": rows[:40],
+        "off_targets_within_10x": [
+            {"target": r["target"], "fold": r["fold_selectivity_vs_primary"]} for r in close
+        ],
+        "assessment": (
+            f"{len(close)} target(s) are within 10-fold of the primary — selectivity is a "
+            "live liability here"
+            if close
+            else "no profiled off-target within 10-fold, on the data available"
+        ),
+        "caveat": (
+            "Selectivity is only as broad as what has been tested. ChEMBL coverage is "
+            "opportunistic, not a panel: absence of an off-target here is not evidence of "
+            "selectivity against it. For kinases, ask for a published kinome panel."
+        ),
+        "citations": sorted({c for r in rows for c in r["citations"]})[:60],
+    }
+
+
+def multiparameter_score(
+    candidates: list[dict[str, Any]] | list[str],
+    profile: str = "oral_small_molecule",
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Rank candidates on a weighted multi-objective desirability profile."""
+    from ..chem.optimisation import score_candidates
+
+    records: list[dict[str, Any]] = []
+    for candidate in candidates:
+        records.append({"smiles": candidate} if isinstance(candidate, str) else dict(candidate))
+
+    if model:
+        from ..models import predict
+
+        try:
+            prediction = predict(model, [r["smiles"] for r in records])
+            lookup = {p["query"]: p for p in prediction["predictions"]}
+            for record in records:
+                hit = lookup.get(record["smiles"])
+                if hit and record.get("potency") is None:
+                    record["potency"] = hit["predicted_value"]
+                    record["potency_source"] = f"predicted by {model}"
+                    record["applicability_domain"] = hit["applicability_domain"]["verdict"]
+        except Exception as exc:
+            return {"error": f"model {model!r} failed: {exc}"}
+
+    return score_candidates(records, profile=profile)
+
+
+def optimisation_profiles() -> dict[str, Any]:
+    """List the available multi-parameter optimisation profiles."""
+    from ..chem.optimisation import list_profiles
+
+    return list_profiles()
+
+
+def covalent_check(smiles: str) -> dict[str, Any]:
+    """Detect covalent warheads and what they imply for assays and modelling."""
+    from ..chem.optimisation import covalent_profile
+
+    return covalent_profile(smiles)
+
+
 # =====================================================================
 # registry
 # =====================================================================
@@ -960,13 +1113,18 @@ TOOLS: list[Tool] = [
         "Build a QSAR model for a target from ChEMBL data, right now, and report its honest "
         "out-of-distribution performance. endpoint: 'inhibition' (IC50, biochemical), 'binding' "
         "(Ki/Kd), 'activation' (EC50, functional/cellular response), 'cell_potency', or "
-        "'any_potency'. split: 'scaffold' (default, pessimistic and useful), 'time' "
-        "(chronological, closest to prospective) or 'random' (optimistic). The returned model "
-        "name is what predict_potency takes.",
+        "'any_potency', 'antimicrobial' (MIC), 'cytotoxicity', 'binding_affinity_relative' "
+        "(RBA) or 'admet'. For anything else, pass standard_types explicitly — ANY ChEMBL "
+        "standard_type can be modelled, and values in ug/mL are converted to molar pX using "
+        "molecular weight. split: 'scaffold' (default, pessimistic and useful), 'time' "
+        "(chronological, closest to prospective) or 'random' (optimistic). Check which "
+        "endpoints a target actually has with chembl_activities before assuming a preset fits.",
         _schema(
             {
                 "target": STR | {"description": "target name or CHEMBL id"},
-                "endpoint": STR | {"enum": ["inhibition", "binding", "activation", "cell_potency", "any_potency"]},
+                "endpoint": STR | {"enum": ["inhibition", "binding", "activation", "cell_potency", "any_potency", "antimicrobial", "cytotoxicity", "binding_affinity_relative", "admet"]},
+                "standard_types": _str_list("explicit ChEMBL standard_type(s), overriding the preset — e.g. ['MIC'] or ['Papp']"),
+                "assay_type": STR | {"enum": ["B", "F", "A", "T", "P", "U"]},
                 "split": STR | {"enum": ["scaffold", "time", "random"]},
                 "name": STR,
                 "max_records": INT,
@@ -1116,6 +1274,64 @@ TOOLS: list[Tool] = [
         ),
         score_designs,
         group="design",
+    ),
+    Tool(
+        "selectivity_profile",
+        "Measured activity for one compound across every target ChEMBL has data for, with "
+        "fold-selectivity against the primary target and a flag for any off-target within "
+        "10-fold. Selectivity is a first-class question in drug discovery and this is the "
+        "evidence-based answer to it — bounded by what has actually been tested.",
+        _schema(
+            {
+                "compound": STR,
+                "primary_target": STR | {"description": "anchor for the ratios; defaults to the most potent"},
+                "limit": INT,
+            },
+            ["compound"],
+        ),
+        selectivity_profile,
+        group="bioactivity",
+    ),
+    Tool(
+        "multiparameter_score",
+        "Rank candidates on several objectives at once — potency, lipophilicity, size, "
+        "polarity, HBD, synthetic accessibility and structural alerts — using a weighted "
+        "desirability profile ('oral_small_molecule', 'cns', 'lead_like', 'antimicrobial', "
+        "'fragment'). Returns each candidate's score and, more usefully, the single "
+        "limiting objective holding it back. Pass a model name to fill in predicted potency. "
+        "Use this instead of ranking on potency alone, which hides the trade-offs.",
+        _schema(
+            {
+                "candidates": {
+                    "type": "array",
+                    "items": {"anyOf": [{"type": "string"}, {"type": "object"}]},
+                    "description": "SMILES strings, or {smiles, potency} objects",
+                },
+                "profile": STR | {"enum": ["oral_small_molecule", "cns", "lead_like", "antimicrobial", "fragment"]},
+                "model": STR | {"description": "optional trained model to supply potency"},
+            },
+            ["candidates"],
+        ),
+        multiparameter_score,
+        group="design",
+    ),
+    Tool(
+        "optimisation_profiles",
+        "List the multi-parameter optimisation profiles and the objectives each one weights.",
+        _schema({}),
+        optimisation_profiles,
+        group="design",
+    ),
+    Tool(
+        "covalent_check",
+        "Detect covalent warheads (acrylamide, chloroacetamide, vinyl sulfone, epoxide, "
+        "beta-lactam, nitrile, boronic acid, sulfonyl fluoride) and report what follows: "
+        "potency becomes time-dependent, equilibrium IC50 models no longer apply, and "
+        "glutathione reactivity becomes the key counter-screen. Run this before trusting any "
+        "potency model on a compound bearing an electrophile.",
+        _schema({"smiles": STR}, ["smiles"]),
+        covalent_check,
+        group="properties",
     ),
     Tool(
         "memory_recall",

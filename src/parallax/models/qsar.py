@@ -75,7 +75,48 @@ ENDPOINT_PRESETS: dict[str, dict[str, Any]] = {
         "note": "mixed endpoint model — use only for coarse ranking, since binding and "
         "functional readouts are pooled",
     },
+    "antimicrobial": {
+        "standard_types": ["MIC", "MIC50", "MIC90"],
+        "assay_type": None,
+        "label": "pMIC (minimum inhibitory concentration)",
+        "note": "whole-organism growth inhibition. MIC is usually reported in ug/mL and is "
+        "converted to a molar pMIC here; it reflects permeability and efflux as well as "
+        "target engagement",
+    },
+    "cytotoxicity": {
+        "standard_types": ["CC50", "GI50", "TGI", "LC50"],
+        "assay_type": None,
+        "label": "pCC50/pGI50 (cytotoxicity)",
+        "note": "cell viability or growth inhibition — used as a counter-screen for "
+        "selectivity, not usually as a primary optimisation endpoint",
+    },
+    "binding_affinity_relative": {
+        "standard_types": ["RBA", "Relative activity"],
+        "assay_type": None,
+        "label": "relative binding affinity",
+        "note": "percentage relative to a reference ligand (common for nuclear receptors); "
+        "not a concentration, so it is modelled on its raw scale, not as a pX value",
+    },
+    "admet": {
+        "standard_types": ["Solubility", "LogD", "LogP", "Papp", "CL", "T1/2", "PPB", "Fu"],
+        "assay_type": "A",
+        "label": "ADMET property",
+        "note": "absorption/distribution/metabolism endpoints. ChEMBL coverage is sparse and "
+        "assay-protocol dependent — check the compound count and source spread before "
+        "trusting any model built on it",
+    },
 }
+
+# Endpoints whose values are concentrations and should become pX = -log10(molar).
+CONCENTRATION_ENDPOINTS = {
+    "IC50", "Ki", "Kd", "EC50", "AC50", "GI50", "CC50", "TGI", "LC50", "ED50",
+    "MIC", "MIC50", "MIC90", "MBC", "Potency",
+}
+
+UNIT_TO_MOLAR: dict[str, float] = {
+    "M": 1.0, "mM": 1e-3, "uM": 1e-6, "um": 1e-6, "nM": 1e-9, "pM": 1e-12, "fM": 1e-15,
+}
+MASS_PER_VOLUME_UNITS = {"ug.mL-1", "ug ml-1", "ug/ml", "mg.L-1", "mg l-1", "mg/l"}
 
 
 @dataclass
@@ -245,17 +286,72 @@ def _metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
     }
 
 
-def aggregate_measurements(rows: Sequence[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def normalise_value(
+    row: dict[str, Any], *, endpoint_types: Sequence[str], mol_weight: float | None = None
+) -> tuple[float | None, str]:
+    """Put a measurement on a modellable scale.
+
+    ChEMBL computes `pchembl_value` only for a handful of concentration endpoints,
+    so relying on it silently excludes whole fields — MIC for antibacterials, for
+    instance. This falls back to converting the raw value: molar units directly,
+    and mass-per-volume (ug/mL, the usual MIC unit) via molecular weight.
+    """
+    if row.get("pchembl_value") is not None:
+        try:
+            return float(row["pchembl_value"]), "pchembl_value"
+        except (TypeError, ValueError):
+            pass
+
+    value = row.get("standard_value")
+    units = (row.get("standard_units") or "").strip()
+    standard_type = row.get("standard_type")
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None, "unparsable value"
+    if value <= 0:
+        return None, "non-positive value"
+
+    is_concentration = standard_type in CONCENTRATION_ENDPOINTS or any(
+        t in CONCENTRATION_ENDPOINTS for t in endpoint_types
+    )
+
+    if is_concentration:
+        if units in UNIT_TO_MOLAR:
+            return -math.log10(value * UNIT_TO_MOLAR[units]), f"converted from {units}"
+        if units.lower() in {u.lower() for u in MASS_PER_VOLUME_UNITS} and mol_weight:
+            molar = (value * 1e-3) / mol_weight  # ug/mL == mg/L
+            if molar <= 0:
+                return None, "non-positive after conversion"
+            return -math.log10(molar), f"converted from {units} using MW {mol_weight:.1f}"
+        return None, f"concentration in unsupported units ({units or 'none'})"
+
+    # Non-concentration endpoints (%, ratios, logD) are modelled on their own scale.
+    if units in {"", "%", "ratio", "log units", "None"}:
+        return value, f"raw {standard_type} value on its native scale"
+    return value, f"raw value in {units}"
+
+
+def aggregate_measurements(
+    rows: Sequence[dict[str, Any]], *, endpoint_types: Sequence[str] = ()
+) -> dict[str, dict[str, Any]]:
     """One record per canonical structure: median value, spread, provenance."""
+    from rdkit.Chem import Descriptors
+
     buckets: dict[str, dict[str, Any]] = {}
     for row in rows:
         smi = row.get("smiles")
-        value = row.get("pchembl_value")
-        if not smi or value is None:
+        if not smi:
             continue
         try:
-            canonical = Chem.MolToSmiles(parse(smi))
+            mol = parse(smi)
+            canonical = Chem.MolToSmiles(mol)
         except Exception:
+            continue
+        value, how = normalise_value(
+            row, endpoint_types=endpoint_types, mol_weight=Descriptors.MolWt(mol)
+        )
+        if value is None:
             continue
         bucket = buckets.setdefault(
             canonical,
@@ -269,6 +365,7 @@ def aggregate_measurements(rows: Sequence[dict[str, Any]]) -> dict[str, dict[str
             },
         )
         bucket["values"].append(float(value))
+        bucket.setdefault("conversions", set()).add(how)
         if row.get("citation"):
             bucket["citations"].add(row["citation"])
         if row.get("document_year"):
@@ -290,6 +387,7 @@ def aggregate_measurements(rows: Sequence[dict[str, Any]]) -> dict[str, dict[str
             "year": min(bucket["years"]) if bucket["years"] else None,
             "chembl_ids": sorted(bucket["chembl_ids"]),
             "assays": sorted(bucket["assay_descriptions"])[:3],
+            "value_derivation": sorted(bucket.get("conversions", {"pchembl_value"})),
         }
     return out
 
@@ -298,6 +396,8 @@ def train(
     target: str,
     *,
     endpoint: str = "inhibition",
+    standard_types: Sequence[str] | None = None,
+    assay_type: str | None = None,
     split: str = "scaffold",
     name: str | None = None,
     max_records: int = 3000,
@@ -310,8 +410,27 @@ def train(
     from ..sources import chembl
 
     preset = ENDPOINT_PRESETS.get(endpoint)
-    if preset is None:
-        raise ValueError(f"unknown endpoint {endpoint!r}; options: {sorted(ENDPOINT_PRESETS)}")
+    if preset is None and not standard_types:
+        raise ValueError(
+            f"unknown endpoint {endpoint!r}. Either use a preset "
+            f"({sorted(ENDPOINT_PRESETS)}) or pass standard_types explicitly, e.g. "
+            "standard_types=['MIC'] — any ChEMBL standard_type works."
+        )
+    if standard_types:
+        # An explicit endpoint overrides the preset entirely, so any ChEMBL
+        # standard_type can be modelled without waiting for a preset to exist.
+        preset = {
+            "standard_types": list(standard_types),
+            "assay_type": assay_type,
+            "label": f"p{'/'.join(standard_types)}"
+            if set(standard_types) & CONCENTRATION_ENDPOINTS
+            else "/".join(standard_types),
+            "note": f"custom endpoint: ChEMBL standard_type(s) {', '.join(standard_types)}"
+            + (f", assay_type {assay_type}" if assay_type else ""),
+        }
+        endpoint = "custom:" + ",".join(standard_types)
+    elif assay_type is not None:
+        preset = {**preset, "assay_type": assay_type}
 
     # Resolve the target.
     target_chembl_id = target
@@ -341,16 +460,17 @@ def train(
     usable = [
         row
         for row in raw_rows
-        if row.get("pchembl_value") is not None
-        and row.get("smiles")
+        if row.get("smiles")
         and row.get("standard_relation") in (None, "=", "~")
         and not row.get("data_validity_comment")
     ]
-    aggregated = aggregate_measurements(usable)
+    aggregated = aggregate_measurements(usable, endpoint_types=preset["standard_types"])
     if len(aggregated) < min_compounds:
         raise ValueError(
             f"only {len(aggregated)} usable compounds for {target_chembl_id}/{endpoint} "
-            f"(need {min_compounds}); try endpoint='any_potency' or a different target"
+            f"(need {min_compounds}). Check which endpoints this target actually has with "
+            f"chembl_activities, then pass standard_types explicitly — e.g. MIC for "
+            f"antibacterials, RBA for nuclear receptors"
         )
 
     records = list(aggregated.values())
