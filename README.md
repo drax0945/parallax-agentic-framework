@@ -274,7 +274,7 @@ src/parallax/
   memory/          the continual-learning store
   agent/           tools (41), skills loader, prompts, session loop, MCP server
 .claude/skills/    10 workflow skills
-tests/             85 tests (`-m network` for the live ones)
+tests/             88 tests (`-m network` for the live ones)
 ```
 
 ## Tests
@@ -288,6 +288,26 @@ The safety tests specifically check that renaming a restricted structure does no
 the screen, and that the route planner refuses before generating.
 
 ---
+
+## Chemical scope
+
+Built for **organic small-molecule drug discovery**. It runs on anything RDKit parses, but
+judgement quality degrades outside that space, and the degradation is not always obvious:
+
+| Chemistry | Status |
+|---|---|
+| Drug-like small molecules, kinase inhibitors, macrocycles | Designed for this |
+| Natural products, peptides, carbohydrates | Descriptors and retro work; drug-likeness rules are less meaningful |
+| Salts and co-crystals | Largest fragment kept (the free acid/base), reported in `notes` |
+| Organometallics, coordination compounds | **Not supported** — flagged `properties_reliable: false` |
+| Polymers, materials, inorganics | Out of scope |
+
+The reaction templates (30) and transform library (12) are medicinal-chemistry oriented:
+amide couplings, cross-couplings, SNAr, macrocyclisation, bioisosteres. There is nothing
+for organometallic synthesis, polymerisation, C-H activation or photoredox.
+
+Targets are not restricted: any ChEMBL target with enough measured data can be modelled.
+Nothing is hardcoded to kinases.
 
 ## Honest limits
 

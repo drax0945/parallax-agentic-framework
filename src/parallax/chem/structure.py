@@ -44,6 +44,12 @@ class Structure:
     identifiers: dict[str, Any] = field(default_factory=dict)
     citations: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    components_dropped: list[str] = field(default_factory=list)
+
+    @property
+    def reliable(self) -> bool:
+        """False when standardisation discarded chemistry the result depends on."""
+        return not any(n.startswith("WARNING") for n in self.notes)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -55,6 +61,8 @@ class Structure:
             "identifiers": self.identifiers,
             "citations": self.citations,
             "notes": self.notes,
+            "components_dropped": self.components_dropped,
+            "properties_reliable": self.reliable,
         }
 
 
@@ -169,8 +177,55 @@ def resolve(query: str, *, standardize: bool = True) -> Structure:
     if not smiles:
         raise StructureError(f"could not resolve a structure for {query!r}")
 
+    # Standardisation keeps the largest fragment, which is what a medicinal
+    # chemist wants for a salt (amlodipine besylate -> amlodipine) and badly
+    # wrong for a coordination compound (cisplatin -> ammonia). Record what was
+    # dropped either way, and refuse to stay quiet about the dangerous case.
+    components = [c for c in smiles.split(".") if c]
     mol = parse(smiles, standardize=standardize)
     canonical = Chem.MolToSmiles(mol)
+    dropped: list[str] = []
+    if standardize and len(components) > 1:
+        kept = set(Chem.MolToSmiles(mol).split("."))
+        for component in components:
+            parsed_component = Chem.MolFromSmiles(component)
+            if parsed_component is None:
+                continue
+            if Chem.MolToSmiles(parsed_component) not in kept:
+                dropped.append(Chem.MolToSmiles(parsed_component))
+
+    if dropped:
+        metals = {
+            "Fe", "Pt", "Pd", "Ru", "Rh", "Ir", "Os", "Co", "Ni", "Cu", "Zn", "Mn", "Cr",
+            "Ti", "V", "Mo", "W", "Au", "Ag", "Hg", "Cd", "Pb", "Sn", "Al", "Gd", "Tc",
+        }
+        source_atoms = {
+            atom.GetSymbol()
+            for component in components
+            if (m := Chem.MolFromSmiles(component)) is not None
+            for atom in m.GetAtoms()
+        }
+        is_coordination = bool(source_atoms & metals)
+        notes.append(
+            f"input had {len(components)} components; kept the largest and dropped: "
+            + ", ".join(dropped)
+        )
+        if is_coordination:
+            notes.append(
+                "WARNING: this looks like a metal coordination compound or organometallic. "
+                "Keeping only the largest organic fragment makes every downstream property "
+                "WRONG for this structure. Parallax's descriptors, rules, models and "
+                "retrosynthesis are built for organic small molecules and do not apply here. "
+                "Treat the computed values as invalid."
+            )
+        else:
+            notes.append(
+                "This is the usual, intended behaviour for a salt or co-crystal: properties "
+                "are reported for the free acid/base, not the salt form. Molecular weight and "
+                "solubility of the supplied salt will differ."
+            )
+
+    structure_components_dropped = dropped
     try:
         structure_inchi = inchi.MolToInchi(mol)
         structure_key = inchi.InchiToInchiKey(structure_inchi) if structure_inchi else None
@@ -190,6 +245,7 @@ def resolve(query: str, *, standardize: bool = True) -> Structure:
         identifiers=identifiers,
         citations=list(dict.fromkeys(citations)),
         notes=notes,
+        components_dropped=structure_components_dropped,
     )
 
 

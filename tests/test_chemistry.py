@@ -195,3 +195,34 @@ class TestDesign:
         assert result["n_pairs_found"] > 0
         assert result["n_transformations"] > 0
         assert all("delta" in example for t in result["transformations"] for example in t["examples"])
+
+
+class TestStandardisationHonesty:
+    """Keeping the largest fragment is right for salts and wrong for metals.
+    Either way the caller must be told."""
+
+    @pytest.mark.network
+    def test_salt_stripping_is_reported_but_allowed(self):
+        from parallax.chem import resolve
+
+        s = resolve("amlodipine besylate")
+        assert s.components_dropped, "the besylate counterion should be recorded"
+        assert s.reliable is True
+        assert any("salt" in n or "co-crystal" in n for n in s.notes)
+
+    @pytest.mark.network
+    def test_coordination_compounds_are_flagged_as_unreliable(self):
+        from parallax.chem import resolve
+
+        for name in ("cisplatin", "ferrocene"):
+            s = resolve(name)
+            assert s.reliable is False, f"{name} must not be silently mangled"
+            assert any(n.startswith("WARNING") for n in s.notes)
+            assert s.as_dict()["properties_reliable"] is False
+
+    def test_single_component_inputs_are_untouched(self):
+        from parallax.chem import resolve
+
+        s = resolve(LORLATINIB)
+        assert s.components_dropped == []
+        assert s.reliable is True
