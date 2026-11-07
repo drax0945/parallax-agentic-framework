@@ -109,6 +109,23 @@ text, which is easy to mistake for an answer.
 
 ---
 
+## The console
+
+```bash
+parallax ui
+```
+
+A local web console at `http://127.0.0.1:8765`. Ask in plain language and watch every
+tool call stream in as it runs, with real durations and pass/fail state. The header shows
+which model is answering — Claude or a local Ollama model — and a **What can it do?**
+drawer explains the evidence tiers, all 46 tools by group, the 11 skills, modellable
+endpoints, optimisation profiles, chemical scope and the limits. That drawer is generated
+from the code, so it cannot drift from what the agent actually does.
+
+It also flags an answer as **not grounded** when the prose carries figures but no tool
+call succeeded and nothing was cited — which is what a small local model does after a
+tool rejects its arguments.
+
 ## Four ways to use it
 
 ### The agent
@@ -373,11 +390,12 @@ src/parallax/
   sources/         pubchem, chembl, europepmc, crossref, openalex, patents, reaxys, nci
   models/          QSAR with scaffold/time splits, applicability domain, model cards
   memory/          the continual-learning store
+  ui/              local web console (stdlib HTTP + SSE, no framework)
   agent/           tools (46), skills loader, prompts, MCP server,
                    and two interchangeable backends: Claude SDK or any
                    OpenAI-compatible endpoint
 .claude/skills/    11 workflow skills
-tests/            126 tests (`-m network` for the live ones)
+tests/            144 tests (`-m network` for the live ones)
 ```
 
 The 11 skills, which are plain markdown you can read and edit:

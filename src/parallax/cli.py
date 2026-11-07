@@ -214,6 +214,18 @@ def _ask_via_openai(
 
 
 @app.command()
+def ui(
+    port: int = typer.Option(8765, "--port"),
+    host: str = typer.Option("127.0.0.1", "--host"),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Do not open a browser."),
+) -> None:
+    """Open the web console: ask questions and watch tool calls stream live."""
+    from .ui import serve
+
+    serve(host=host, port=port, open_browser=not no_browser)
+
+
+@app.command()
 def providers() -> None:
     """Show which model providers are configured and ready."""
     from .agent.openai_backend import available_providers

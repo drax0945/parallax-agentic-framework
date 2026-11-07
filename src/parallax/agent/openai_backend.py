@@ -100,6 +100,35 @@ PRESETS: dict[str, dict[str, str]] = {
 }
 
 
+# Local models known to handle tool calling well, best first.
+TOOL_CAPABLE_LOCAL = ("qwen2.5", "qwen3", "llama3.3", "llama3.2", "llama3.1", "mistral-nemo", "mistral", "firefunction")
+
+
+def installed_ollama_models(base_url: str = "http://localhost:11434") -> list[str]:
+    """Models actually pulled locally, so we never default to an absent one."""
+    import httpx
+
+    try:
+        response = httpx.get(base_url.rstrip("/").removesuffix("/v1") + "/api/tags", timeout=2.0)
+        return [m["name"] for m in response.json().get("models", []) if m.get("name")]
+    except Exception:
+        return []
+
+
+def pick_local_model(base_url: str = "http://localhost:11434") -> str | None:
+    """Choose an installed model, preferring ones good at tool calling."""
+    installed = installed_ollama_models(base_url)
+    if not installed:
+        return None
+    embeddings = ("embed", "bge", "minilm")
+    usable = [m for m in installed if not any(e in m.lower() for e in embeddings)]
+    for preferred in TOOL_CAPABLE_LOCAL:
+        for model in usable:
+            if model.lower().startswith(preferred):
+                return model
+    return usable[0] if usable else None
+
+
 def resolve_provider(
     name: str | None = None, *, model: str | None = None, base_url: str | None = None
 ) -> Provider:
@@ -131,10 +160,18 @@ def resolve_provider(
             f"unknown provider {name!r}; known: {sorted(PRESETS)}. "
             "For anything else set PARALLAX_LLM_BASE_URL to its OpenAI-compatible endpoint."
         )
+
+    chosen = model or cfg.credential("PARALLAX_LLM_MODEL")
+    if not chosen and name == "ollama":
+        # Defaulting to a model nobody has pulled gives a confusing 404, so ask
+        # the local daemon what is actually installed.
+        chosen = pick_local_model(spec["base_url"])
+    chosen = chosen or spec["model"]
+
     return Provider(
         name=name,
         base_url=spec["base_url"],
-        model=model or cfg.credential("PARALLAX_LLM_MODEL") or spec["model"],
+        model=chosen,
         api_key=cfg.credential(spec["key_env"]) if spec["key_env"] else None,
     )
 

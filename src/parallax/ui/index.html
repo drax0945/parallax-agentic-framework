@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Parallax Console</title>
+<style>
+:root {
+  --bg: #fbfaf8; --panel: #ffffff; --sunken: #f4f2ef;
+  --ink: #16181d; --muted: #5d6470; --faint: #8b929c;
+  --line: #e4e1dc; --line-soft: #efece8;
+  --accent: #1f6f5c; --accent-soft: #e8f2ee;
+  --local: #6b4ea8; --local-soft: #efeaf8;
+  --warn: #8a5a16; --warn-soft: #fdf3e7;
+  --err: #a33232; --err-soft: #fbeceb;
+  --ok: #1f6f5c;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131519; --panel: #1a1d22; --sunken: #15181c;
+    --ink: #e8e6e3; --muted: #99a0aa; --faint: #6e767f;
+    --line: #2a2e35; --line-soft: #23272d;
+    --accent: #6fd3b4; --accent-soft: #172924;
+    --local: #b09be0; --local-soft: #221d33;
+    --warn: #e0b472; --warn-soft: #2b2316;
+    --err: #e88c84; --err-soft: #2e1b1a;
+    --ok: #6fd3b4;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.6 var(--sans); -webkit-font-smoothing: antialiased;
+  display: flex; flex-direction: column;
+}
+
+/* ---------- header ---------- */
+header {
+  display: flex; align-items: center; gap: 16px;
+  padding: 12px 20px; border-bottom: 1px solid var(--line);
+  background: var(--panel); flex-wrap: wrap;
+}
+.brand { display: flex; align-items: baseline; gap: 9px; margin-right: auto; }
+.brand h1 { font-size: 16px; margin: 0; letter-spacing: -0.01em; font-weight: 650; }
+.brand span { font-size: 12.5px; color: var(--faint); }
+
+.runtime {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 5px 11px 5px 9px; border-radius: 999px;
+  background: var(--accent-soft); border: 1px solid transparent;
+  font-size: 12.5px; font-weight: 550; color: var(--accent);
+}
+.runtime.is-local { background: var(--local-soft); color: var(--local); }
+.runtime.is-down  { background: var(--err-soft);   color: var(--err); }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+.runtime .model { font-family: var(--mono); font-size: 11.5px; opacity: .8; font-weight: 400; }
+
+select, button, input, textarea { font-family: inherit; font-size: inherit; color: inherit; }
+select {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 7px; padding: 6px 9px; font-size: 13px;
+}
+.ghost {
+  background: none; border: 1px solid var(--line); border-radius: 7px;
+  padding: 6px 12px; font-size: 13px; cursor: pointer; color: var(--muted);
+}
+.ghost:hover { border-color: var(--muted); color: var(--ink); }
+.ghost[aria-expanded="true"] { background: var(--sunken); color: var(--ink); }
+
+/* ---------- scope drawer ---------- */
+#scope[hidden] { display: none; }
+#scope {
+  border-bottom: 1px solid var(--line); background: var(--sunken);
+  max-height: 58vh; overflow-y: auto;
+}
+.scope-inner { padding: 20px; max-width: 1180px; margin: 0 auto; }
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 16px; }
+.tab {
+  background: none; border: 1px solid transparent; border-radius: 7px;
+  padding: 6px 12px; font-size: 13px; cursor: pointer; color: var(--muted);
+}
+.tab:hover { color: var(--ink); }
+.tab[aria-selected="true"] {
+  background: var(--panel); border-color: var(--line); color: var(--ink); font-weight: 550;
+}
+.pane[hidden] { display: none; }
+.lede { color: var(--muted); font-size: 13.5px; margin: 0 0 14px; max-width: 72ch; }
+.grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+.card {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 12px 14px;
+}
+.card h4 { margin: 0 0 5px; font-size: 13px; letter-spacing: .01em; }
+.card p { margin: 0; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.card code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
+.tierrow { display: grid; grid-template-columns: 110px 1fr; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line-soft); }
+.tierrow:last-child { border: 0; }
+.pill {
+  font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+  background: var(--accent-soft); color: var(--accent);
+  padding: 3px 8px; border-radius: 5px; height: fit-content; text-align: center; font-weight: 600;
+}
+ul.plain { margin: 0; padding-left: 18px; }
+ul.plain li { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.statusline { font-size: 12.5px; color: var(--muted); }
+.statusline b { color: var(--ink); font-weight: 550; }
+
+/* ---------- main ---------- */
+main { flex: 1; display: grid; grid-template-columns: minmax(0,1fr) 400px; min-height: 0; }
+@media (max-width: 920px) { main { grid-template-columns: 1fr; } #log { display: none; } }
+
+#conversation { overflow-y: auto; padding: 24px 28px 8px; }
+.wrap { max-width: 740px; margin: 0 auto; }
+.empty { color: var(--faint); font-size: 14px; padding: 40px 0; }
+.empty h2 { color: var(--ink); font-size: 18px; margin: 0 0 8px; font-weight: 600; }
+.examples { display: flex; flex-direction: column; gap: 7px; margin-top: 18px; }
+.example {
+  text-align: left; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 9px; padding: 10px 13px; cursor: pointer; font-size: 13.5px; color: var(--muted);
+}
+.example:hover { border-color: var(--accent); color: var(--ink); }
+
+.turn { margin-bottom: 26px; }
+.question {
+  font-size: 15px; font-weight: 550; padding: 11px 14px; background: var(--sunken);
+  border-left: 2px solid var(--accent); border-radius: 0 8px 8px 0; margin-bottom: 16px;
+}
+.answer { white-space: pre-wrap; }
+.answer h2, .answer h3 { font-size: 15px; margin: 18px 0 6px; }
+.answer code { font-family: var(--mono); font-size: 13px; background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; }
+.meta { margin-top: 14px; font-size: 12.5px; color: var(--faint); font-family: var(--mono); }
+.banner {
+  background: var(--err-soft); color: var(--err); border-radius: 8px;
+  padding: 12px 14px; font-size: 13.5px; margin-bottom: 14px;
+}
+.banner pre { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; margin: 7px 0 0; opacity: .85; }
+.banner.warn { background: var(--warn-soft); color: var(--warn); }
+.banner strong { display: block; margin-bottom: 3px; }
+
+/* ---------- composer ---------- */
+#composer {
+  border-top: 1px solid var(--line); background: var(--panel); padding: 14px 28px;
+}
+.composer-inner { max-width: 740px; margin: 0 auto; display: flex; gap: 10px; align-items: flex-end; }
+textarea {
+  flex: 1; resize: none; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 9px; padding: 11px 13px; min-height: 46px; max-height: 180px; line-height: 1.5;
+}
+textarea:focus { outline: none; border-color: var(--accent); }
+.send {
+  background: var(--accent); color: var(--bg); border: 0; border-radius: 9px;
+  padding: 12px 20px; font-weight: 600; cursor: pointer; font-size: 14px;
+}
+.send:disabled { opacity: .45; cursor: not-allowed; }
+@media (prefers-color-scheme: dark) { .send { color: #10231e; } }
+
+/* ---------- live log ---------- */
+#log {
+  border-left: 1px solid var(--line); background: var(--sunken);
+  display: flex; flex-direction: column; min-height: 0;
+}
+.log-head {
+  display: flex; align-items: center; gap: 9px; padding: 12px 16px;
+  border-bottom: 1px solid var(--line); font-size: 12px; text-transform: uppercase;
+  letter-spacing: .07em; color: var(--faint); font-weight: 600;
+}
+.live { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.live.on { background: var(--ok); animation: pulse 1.3s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+.log-count { margin-left: auto; font-family: var(--mono); letter-spacing: 0; text-transform: none; }
+#entries { flex: 1; overflow-y: auto; padding: 10px 12px; font-family: var(--mono); font-size: 12px; }
+.entry { padding: 8px 10px; border-radius: 7px; margin-bottom: 6px; background: var(--panel); border: 1px solid var(--line-soft); }
+.entry.pending { border-color: var(--accent); }
+.entry.failed { border-color: var(--err); background: var(--err-soft); }
+.entry-top { display: flex; align-items: baseline; gap: 8px; }
+.tname { color: var(--accent); font-weight: 600; }
+.entry.failed .tname { color: var(--err); }
+.tstamp { color: var(--faint); font-size: 11px; margin-left: auto; }
+.targs { color: var(--muted); margin-top: 4px; word-break: break-all; line-height: 1.45; }
+.tsum { color: var(--faint); margin-top: 4px; line-height: 1.45; }
+.took { color: var(--faint); font-size: 11px; }
+.log-empty { color: var(--faint); font-size: 12px; padding: 16px 4px; font-family: var(--sans); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1>Parallax</h1>
+    <span>cheminformatics console</span>
+  </div>
+
+  <div class="runtime" id="runtime" title="which model is answering">
+    <span class="dot"></span>
+    <span id="rt-label">checking…</span>
+    <span class="model" id="rt-model"></span>
+  </div>
+
+  <select id="provider" title="model backend">
+    <option value="claude">Claude</option>
+  </select>
+
+  <button class="ghost" id="scope-toggle" aria-expanded="false" aria-controls="scope">
+    What can it do?
+  </button>
+</header>
+
+<section id="scope" hidden>
+  <div class="scope-inner">
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" data-pane="tiers" aria-selected="true">Evidence tiers</button>
+      <button class="tab" role="tab" data-pane="tools" aria-selected="false">Tools</button>
+      <button class="tab" role="tab" data-pane="skills" aria-selected="false">Skills</button>
+      <button class="tab" role="tab" data-pane="endpoints" aria-selected="false">Endpoints &amp; profiles</button>
+      <button class="tab" role="tab" data-pane="chemistry" aria-selected="false">Chemical scope</button>
+      <button class="tab" role="tab" data-pane="limits" aria-selected="false">Limits</button>
+      <button class="tab" role="tab" data-pane="runtime" aria-selected="false">Model backends</button>
+    </div>
+    <div class="pane" id="pane-tiers"></div>
+    <div class="pane" id="pane-tools" hidden></div>
+    <div class="pane" id="pane-skills" hidden></div>
+    <div class="pane" id="pane-endpoints" hidden></div>
+    <div class="pane" id="pane-chemistry" hidden></div>
+    <div class="pane" id="pane-limits" hidden></div>
+    <div class="pane" id="pane-runtime" hidden></div>
+  </div>
+</section>
+
+<main>
+  <div id="conversation">
+    <div class="wrap" id="thread">
+      <div class="empty">
+        <h2>Ask a chemistry question.</h2>
+        <p>Every number comes back tagged <b>measured</b>, <b>computed</b> or <b>modelled</b>, with its source. Tool calls stream on the right as they run.</p>
+        <div class="examples">
+          <button class="example">Profile lorlatinib and tell me what is measured versus computed</button>
+          <button class="example">What is the molecular weight and cLogP of aspirin?</button>
+          <button class="example">How selective is crizotinib across its known targets?</button>
+          <button class="example">Propose macrocyclic analogs of crizotinib and say whether I can trust the predictions</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <aside id="log">
+    <div class="log-head">
+      <span class="live" id="live"></span> Tool calls
+      <span class="log-count" id="log-count"></span>
+    </div>
+    <div id="entries"><div class="log-empty">Nothing yet. Calls appear here the moment the agent makes them, with real durations.</div></div>
+  </aside>
+</main>
+
+<form id="composer">
+  <div class="composer-inner">
+    <textarea id="q" rows="1" placeholder="Ask about a compound, a target, a route, a design…"></textarea>
+    <button class="send" id="send" type="submit">Ask</button>
+  </div>
+</form>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+let busy = false, scope = null, toolCount = 0;
+
+/* ---------- runtime badge ---------- */
+async function refreshRuntime() {
+  const provider = $('#provider').value;
+  const badge = $('#runtime');
+  try {
+    const r = await fetch(`/api/runtime?provider=${encodeURIComponent(provider)}`);
+    const d = await r.json();
+    $('#rt-label').textContent = d.ready ? d.label : `${d.label} unavailable`;
+    $('#rt-model').textContent = d.model || '';
+    badge.classList.toggle('is-local', !!d.local && d.ready);
+    badge.classList.toggle('is-down', !d.ready);
+    badge.title = [d.detail, d.credentials, d.local ? 'runs on this machine' : 'hosted'].filter(Boolean).join(' · ');
+  } catch {
+    $('#rt-label').textContent = 'runtime unknown';
+    badge.classList.add('is-down');
+  }
+}
+
+/* ---------- scope drawer ---------- */
+function card(title, body) { const c = el('div','card'); c.append(el('h4',null,title), el('p',null,body)); return c; }
+
+function renderScope(d) {
+  const tiers = $('#pane-tiers');
+  tiers.append(el('p','lede','Every quantitative claim belongs to exactly one tier, and the agent always says which. Conflating them is the mistake this whole framework exists to prevent.'));
+  const box = el('div','card');
+  d.tiers.forEach(t => {
+    const row = el('div','tierrow');
+    row.append(el('span','pill',t.tier));
+    const right = el('div');
+    right.append(el('div',null,t.meaning));
+    right.append(el('p',null,`Cites ${t.cites}. Source: ${t.sources}.`));
+    row.append(right); box.append(row);
+  });
+  tiers.append(box);
+
+  const tools = $('#pane-tools');
+  tools.append(el('p','lede',`${d.n_tools} tools. None of them calls a language model — the model only decides which to use and writes the prose.`));
+  const groups = el('div','grid');
+  Object.entries(d.tool_groups).sort().forEach(([g, list]) => {
+    const c = el('div','card');
+    c.append(el('h4',null,`${g} · ${list.length}`));
+    list.forEach(t => {
+      const p = el('p'); const code = el('code',null,t.name);
+      p.append(code, document.createTextNode(' ' + t.summary)); c.append(p);
+    });
+    groups.append(c);
+  });
+  tools.append(groups);
+
+  const skills = $('#pane-skills');
+  skills.append(el('p','lede',`${d.skills.length} skills — worked procedures the agent reads before starting a task of that kind.`));
+  const sg = el('div','grid');
+  d.skills.forEach(s => sg.append(card(s.name, s.description)));
+  skills.append(sg);
+
+  const ep = $('#pane-endpoints');
+  ep.append(el('p','lede','Potency endpoints it can model, and the multi-objective profiles for ranking designs. Any ChEMBL endpoint works beyond these presets.'));
+  const eg = el('div','grid');
+  d.endpoints.forEach(e => eg.append(card(`${e.name} — ${e.label}`, e.note)));
+  ep.append(eg);
+  ep.append(el('p','lede','Optimisation profiles'));
+  const pg = el('div','grid');
+  d.mpo_profiles.forEach(p => pg.append(card(p.name, p.description)));
+  ep.append(pg);
+
+  const chem = $('#pane-chemistry');
+  chem.append(el('p','lede',`Built for organic small-molecule drug discovery. ${d.n_reaction_templates} reaction templates, medicinal-chemistry oriented.`));
+  const cg = el('div','grid');
+  d.chemical_scope.forEach(c => cg.append(card(c.area, c.status)));
+  chem.append(cg);
+
+  const lim = $('#pane-limits');
+  lim.append(el('p','lede','Stated here because a tool built on provenance has no business being vague about its own.'));
+  const box2 = el('div','card'); const ul = el('ul','plain');
+  d.limits.forEach(l => ul.append(el('li',null,l)));
+  box2.append(ul); lim.append(box2);
+
+  const rt = $('#pane-runtime');
+  rt.append(el('p','lede','The chemistry is identical whichever model reasons over it. Only ask needs a model at all; every tool runs locally without one.'));
+  const rg = el('div','grid');
+  rg.append(card('claude (default)', 'Bundled runtime. Needs `parallax login` or ANTHROPIC_API_KEY.'));
+  d.providers.forEach(p => {
+    const state = p.needs_key ? (p.key_present ? 'ready' : `needs ${p.needs_key}`) : 'no account needed';
+    rg.append(card(`${p.provider} — ${p.model}`, `${state}. ${p.note}`));
+  });
+  rt.append(rg);
+
+  const sel = $('#provider');
+  d.providers.forEach(p => {
+    const o = el('option', null, p.provider + (p.needs_key && !p.key_present ? ' (no key)' : ''));
+    o.value = p.provider; sel.append(o);
+  });
+}
+
+$('#scope-toggle').addEventListener('click', async () => {
+  const drawer = $('#scope'), btn = $('#scope-toggle');
+  const open = drawer.hidden;
+  drawer.hidden = !open; btn.setAttribute('aria-expanded', String(open));
+  if (open && !scope) { scope = await (await fetch('/api/scope')).json(); renderScope(scope); }
+  if (open) selectTab(document.querySelector('.tab'));
+});
+
+function selectTab(tab) {
+  if (!tab) return;
+  document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', String(t === tab)));
+  document.querySelectorAll('.pane').forEach(p => p.hidden = (p.id !== 'pane-' + tab.dataset.pane));
+}
+document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => selectTab(tab)));
+
+/* ---------- live tool log ---------- */
+function logCall(ev) {
+  if (toolCount === 0) $('#entries').innerHTML = '';
+  toolCount++;
+  const e = el('div','entry pending'); e.id = 'call-' + toolCount;
+  e.dataset.tool = ev.tool;
+  const top = el('div','entry-top');
+  top.append(el('span','tname', ev.tool), el('span','tstamp', ev.at));
+  e.append(top);
+  const args = Object.entries(ev.args || {}).map(([k,v]) => `${k}=${String(v).slice(0,70)}`).join('  ');
+  if (args) e.append(el('div','targs', args));
+  $('#entries').append(e);
+  $('#entries').scrollTop = $('#entries').scrollHeight;
+  $('#log-count').textContent = toolCount;
+}
+function logResult(ev) {
+  const nodes = [...document.querySelectorAll('.entry.pending')].filter(n => n.dataset.tool === ev.tool);
+  const e = nodes[nodes.length - 1]; if (!e) return;
+  e.classList.remove('pending');
+  if (!ev.ok) e.classList.add('failed');
+  const sum = el('div','tsum', ev.summary || (ev.ok ? 'ok' : 'failed'));
+  if (ev.took != null) sum.append(el('span','took', `  ${ev.took}s`));
+  e.append(sum);
+  $('#entries').scrollTop = $('#entries').scrollHeight;
+}
+
+/* ---------- ask ---------- */
+function ask(question) {
+  if (busy || !question.trim()) return;
+  busy = true; toolCount = 0;
+  $('#send').disabled = true; $('#live').classList.add('on');
+  $('#entries').innerHTML = ''; $('#log-count').textContent = '';
+
+  const thread = $('#thread');
+  const empty = thread.querySelector('.empty'); if (empty) empty.remove();
+  const turn = el('div','turn');
+  turn.append(el('div','question', question));
+  const answer = el('div','answer');
+  turn.append(answer); thread.append(turn);
+  turn.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  const url = `/api/ask?q=${encodeURIComponent(question)}&provider=${encodeURIComponent($('#provider').value)}`;
+  const es = new EventSource(url);
+
+  es.onmessage = (m) => {
+    const ev = JSON.parse(m.data);
+    if (ev.kind === 'tool_call') logCall(ev);
+    else if (ev.kind === 'tool_result') logResult(ev);
+    else if (ev.kind === 'text') answer.textContent += (answer.textContent ? '\n\n' : '') + ev.text;
+    else if (ev.kind === 'error') {
+      const b = el('div','banner', ev.message);
+      if (ev.advice) b.append(el('pre', null, ev.advice));
+      turn.insertBefore(b, answer);
+    } else if (ev.kind === 'done') {
+      es.close(); busy = false;
+      $('#send').disabled = false; $('#live').classList.remove('on');
+      if (ev.ungrounded) {
+        const w = el('div','banner warn');
+        w.append(el('strong', null, 'This answer is not grounded.'));
+        w.append(document.createTextNode(
+          'It contains figures, but no tool call succeeded and no source was cited — so the ' +
+          'numbers came from the model, not from data. Smaller models do this after a tool ' +
+          'rejects their arguments. Re-run on a stronger model, or use the CLI directly.'));
+        turn.insertBefore(w, answer);
+      }
+      const parts = [`${ev.n_tool_calls} tool calls`];
+      if (ev.tools_failed) parts.push(`${ev.tools_failed} failed`);
+      parts.push(`${ev.citations} sources cited`, `${ev.elapsed}s`);
+      turn.append(el('div','meta', parts.join(' · ')));
+    }
+  };
+  es.onerror = () => {
+    es.close(); busy = false;
+    $('#send').disabled = false; $('#live').classList.remove('on');
+    if (!answer.textContent) turn.insertBefore(el('div','banner','Lost the connection to the Parallax server.'), answer);
+  };
+}
+
+$('#composer').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const q = $('#q').value; $('#q').value = ''; $('#q').style.height = 'auto';
+  ask(q);
+});
+$('#q').addEventListener('input', (e) => {
+  e.target.style.height = 'auto';
+  e.target.style.height = Math.min(e.target.scrollHeight, 180) + 'px';
+});
+$('#q').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#composer').requestSubmit(); }
+});
+document.addEventListener('click', (e) => {
+  if (e.target.classList.contains('example')) { $('#q').value = e.target.textContent.trim(); $('#q').focus(); }
+});
+$('#provider').addEventListener('change', refreshRuntime);
+refreshRuntime();
+</script>
+</body>
+</html>
