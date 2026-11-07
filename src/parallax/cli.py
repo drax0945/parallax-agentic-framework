@@ -71,6 +71,10 @@ def _fail(message: str) -> None:
 def ask(
     prompt: list[str] = typer.Argument(..., help="What you want the agent to do."),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Override the model."),
+    provider: Optional[str] = typer.Option(
+        None, "--provider", "-p",
+        help="claude (default) | ollama | openai | openrouter | groq | together | mistral | deepseek",
+    ),
     max_turns: int = typer.Option(60, "--max-turns", help="Cap the agent's tool-use turns."),
     show_tools: bool = typer.Option(True, "--show-tools/--quiet", help="Print tool calls as they run."),
     json_out: bool = typer.Option(False, "--json", help="Emit the full transcript as JSON."),
@@ -80,6 +84,11 @@ def ask(
 
     question = " ".join(prompt)
     settings().ensure_dirs()
+
+    chosen = (provider or settings().credential("PARALLAX_LLM_PROVIDER") or "claude").lower()
+    if chosen != "claude":
+        _ask_via_openai(question, chosen, model, max_turns, show_tools, json_out)
+        return
 
     def on_turn(turn: Turn) -> None:
         if json_out:
@@ -161,6 +170,69 @@ def login() -> None:
         return
     typer.echo(_c(f"  using {executable}", DIM))
     raise typer.Exit(subprocess.call([str(executable), "/login"]))
+
+
+def _ask_via_openai(
+    question: str, provider: str, model: Optional[str], max_turns: int,
+    show_tools: bool, json_out: bool,
+) -> None:
+    """Run the task against any OpenAI-compatible endpoint."""
+    from .agent.openai_backend import Step, resolve_provider, run
+
+    try:
+        target = resolve_provider(provider, model=model)
+    except ValueError as exc:
+        _fail(str(exc))
+        return
+
+    if not json_out:
+        typer.echo(_c(f"  {target.name} · {target.model}", DIM))
+
+    def on_step(step: Step) -> None:
+        if json_out:
+            return
+        if step.kind == "tool_use" and show_tools:
+            arguments = ", ".join(f"{k}={str(v)[:48]}" for k, v in list(step.payload.items())[:3])
+            typer.echo(_c(f"  · {step.tool}({arguments})", DIM))
+        elif step.kind == "text" and step.text.strip():
+            typer.echo(step.text)
+
+    result = run(question, provider=target, max_turns=max_turns, on_step=on_step)
+
+    if json_out:
+        dump(result)
+        return
+    if result.get("error"):
+        typer.echo()
+        typer.echo(_c(f"  {result['error']}", RED), err=True)
+        typer.echo(_c(f"  {result['advice']}", DIM), err=True)
+        raise typer.Exit(2)
+    typer.echo()
+    typer.echo(
+        _c(f"  {result['n_tool_calls']} tool calls · {result['citations']} sources cited", DIM)
+    )
+
+
+@app.command()
+def providers() -> None:
+    """Show which model providers are configured and ready."""
+    from .agent.openai_backend import available_providers
+
+    head("Model providers for `parallax ask`")
+    typer.echo(f"  {_c('claude', BOLD)} (default) — bundled runtime; `parallax login` or ANTHROPIC_API_KEY")
+    typer.echo()
+    for entry in available_providers():
+        if entry["needs_key"]:
+            mark = _c("ready", GREEN) if entry["key_present"] else _c("no key", YELLOW)
+            detail = f"needs {entry['needs_key']}"
+        else:
+            mark = _c("local", CYAN)
+            detail = "no account needed"
+        typer.echo(f"  {mark:18s} {entry['provider']:12s} {entry['model']}")
+        typer.echo(_c(f"                     {detail} — {entry['note']}", DIM))
+    typer.echo()
+    typer.echo(_c("  use with:  parallax ask --provider ollama \"...\"", DIM))
+    typer.echo(_c("  anything else: set PARALLAX_LLM_BASE_URL to its OpenAI-compatible endpoint", DIM))
 
 
 @app.command()
@@ -754,6 +826,18 @@ def doctor() -> None:
     typer.echo(
         _c("      only `parallax ask` needs these; every other command runs without a model", DIM)
     )
+    from .agent.openai_backend import available_providers
+
+    alternatives = [p for p in available_providers() if p["key_present"]]
+    if alternatives:
+        typer.echo(
+            f"  {_c('✓', GREEN)} other providers         "
+            + ", ".join(p["provider"] for p in alternatives)
+        )
+    else:
+        typer.echo(
+            _c("      alternatives: `parallax providers` (ollama runs locally, no account)", DIM)
+        )
     kv("model", cfg.model)
 
     head("Data sources")

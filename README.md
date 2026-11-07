@@ -67,12 +67,41 @@ Only `parallax ask` — the conversational agent — needs to reach a model. Eve
 `precedent`, `cite`, `memory`, the MCP server and the whole Python library) is local
 computation over public APIs and runs on a machine with no Claude access at all.
 
-For `parallax ask`, pick one:
+For `parallax ask`, pick any model provider. Claude is the default:
 
 ```bash
 parallax login                          # sign in once, uses the bundled binary
-export ANTHROPIC_API_KEY=sk-ant-...     # or use an API key instead
+export ANTHROPIC_API_KEY=sk-ant-...     # or an API key
 ```
+
+**Or use any other model, including a free local one.** The agent speaks the
+OpenAI-compatible `/chat/completions` tool-calling protocol, so it runs against Ollama,
+OpenAI, Groq, Together, Mistral, DeepSeek, OpenRouter, vLLM, LM Studio or an enterprise
+gateway — same 46 tools, same 11 skills, same memory.
+
+```bash
+# fully local and free, no account anywhere
+ollama pull qwen2.5:14b
+parallax ask --provider ollama "Profile lorlatinib"
+
+# or a hosted provider
+export GROQ_API_KEY=...
+parallax ask --provider groq "Build an ALK model"
+
+# or anything else that speaks the protocol
+export PARALLAX_LLM_BASE_URL=https://my-gateway/v1
+export PARALLAX_LLM_MODEL=my-model
+```
+
+`parallax providers` lists what is configured. Set `PARALLAX_LLM_PROVIDER` to make a
+choice permanent.
+
+A caveat worth stating: the discipline here — separating measured from computed from
+modelled, refusing out-of-domain predictions, never inventing a citation — is enforced
+partly by the tools and partly by the model following instructions. A small local model
+follows them less reliably than a frontier one. The tools still refuse to fabricate and
+`audit_draft` still catches invented references, so the floor holds; the ceiling depends
+on the model you point it at.
 
 If neither is set up, `parallax ask` exits with a clear diagnosis rather than a cryptic
 one-line reply — the underlying runtime reports "Not logged in" as ordinary assistant
@@ -344,9 +373,11 @@ src/parallax/
   sources/         pubchem, chembl, europepmc, crossref, openalex, patents, reaxys, nci
   models/          QSAR with scaffold/time splits, applicability domain, model cards
   memory/          the continual-learning store
-  agent/           tools (46), skills loader, prompts, session loop, MCP server
+  agent/           tools (46), skills loader, prompts, MCP server,
+                   and two interchangeable backends: Claude SDK or any
+                   OpenAI-compatible endpoint
 .claude/skills/    11 workflow skills
-tests/            115 tests (`-m network` for the live ones)
+tests/            126 tests (`-m network` for the live ones)
 ```
 
 The 11 skills, which are plain markdown you can read and edit:
