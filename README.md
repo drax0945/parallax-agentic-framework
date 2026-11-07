@@ -45,8 +45,8 @@ a genuine J. Med. Chem. DOI it had never looked up.
 
 ## Install
 
-Needs Python 3.11+ and either the [`claude` CLI](https://claude.com/claude-code) logged in
-(no API key needed — it reuses your session) or `ANTHROPIC_API_KEY`.
+Needs Python 3.11+. Nothing else is required to install: `claude-agent-sdk` ships its own
+`claude` binary, so Claude Code does **not** need to be installed separately.
 
 ```bash
 uv venv --python 3.12 .venv
@@ -56,8 +56,27 @@ VIRTUAL_ENV=.venv uv pip install -e .
 ```
 
 `doctor` checks dependencies, the agent runtime, every data source and the memory store.
-No credentials are required: PubChem, ChEMBL, Europe PMC, Crossref and the NCI resolver
-are all free and keyless.
+
+### What needs credentials, and what does not
+
+**No chemistry credentials are ever required.** PubChem, ChEMBL, Europe PMC, Crossref and
+the NCI resolver are free and keyless.
+
+Only `parallax ask` — the conversational agent — needs to reach a model. Everything else
+(`compound`, `properties`, `train`, `predict`, `retro`, `design`, `mmpa`, `lit`,
+`precedent`, `cite`, `memory`, the MCP server and the whole Python library) is local
+computation over public APIs and runs on a machine with no Claude access at all.
+
+For `parallax ask`, pick one:
+
+```bash
+parallax login                          # sign in once, uses the bundled binary
+export ANTHROPIC_API_KEY=sk-ant-...     # or use an API key instead
+```
+
+If neither is set up, `parallax ask` exits with a clear diagnosis rather than a cryptic
+one-line reply — the underlying runtime reports "Not logged in" as ordinary assistant
+text, which is easy to mistake for an answer.
 
 ---
 
@@ -327,7 +346,7 @@ src/parallax/
   memory/          the continual-learning store
   agent/           tools (46), skills loader, prompts, session loop, MCP server
 .claude/skills/    11 workflow skills
-tests/            110 tests (`-m network` for the live ones)
+tests/            115 tests (`-m network` for the live ones)
 ```
 
 The 11 skills, which are plain markdown you can read and edit:

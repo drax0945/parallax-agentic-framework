@@ -154,3 +154,44 @@ class TestCovalentDetection:
         joined = " ".join(result["implications"]).lower()
         assert "time-dependent" in joined
         assert "kinact" in joined
+
+
+class TestAgentRuntimeDiagnosis:
+    """An auth failure arrives as ordinary assistant text, so it must be caught."""
+
+    def test_not_logged_in_is_diagnosed(self):
+        from parallax.agent.loop import diagnose_auth_failure
+
+        problem = diagnose_auth_failure("Not logged in · Please run /login", 0)
+        assert problem is not None
+        assert "parallax login" in problem["fix"]
+
+    def test_invalid_api_key_is_diagnosed(self):
+        from parallax.agent.loop import diagnose_auth_failure
+
+        problem = diagnose_auth_failure("Invalid API key · Fix external API key", 0)
+        assert problem is not None
+        assert "ANTHROPIC_API_KEY" in problem["reason"]
+
+    def test_a_real_answer_is_not_mistaken_for_a_failure(self):
+        from parallax.agent.loop import diagnose_auth_failure
+
+        assert diagnose_auth_failure("Lorlatinib has an ALK pChEMBL of 9.7.", 3) is None
+        # even with no tool calls, a substantive answer is not an auth error
+        assert diagnose_auth_failure("x" * 500, 0) is None
+
+    def test_the_runtime_binary_is_resolvable(self):
+        """`parallax ask` needs a claude binary; the SDK bundles one."""
+        import shutil
+
+        from parallax.agent.loop import bundled_cli
+
+        assert shutil.which("claude") or bundled_cli(), (
+            "no claude binary on PATH and none bundled with claude-agent-sdk"
+        )
+
+    def test_login_command_is_registered(self):
+        from parallax.cli import app
+
+        names = {c.name or c.callback.__name__ for c in app.registered_commands}
+        assert "login" in names

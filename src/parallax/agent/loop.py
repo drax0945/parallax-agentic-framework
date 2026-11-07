@@ -178,9 +178,69 @@ async def run_session(
         "finished": utcnow(),
     }
 
+    problem = diagnose_auth_failure(answer, len(tool_calls))
+    if problem:
+        result["auth_problem"] = problem
+
     if save_run:
         result["run_dir"] = _save_run(result)
     return result
+
+
+AUTH_SIGNATURES: list[tuple[str, str, str]] = [
+    (
+        "not logged in",
+        "no credentials",
+        "Authenticate once:  parallax login\n"
+        "  or use an API key instead:  export ANTHROPIC_API_KEY=sk-ant-...",
+    ),
+    (
+        "invalid api key",
+        "ANTHROPIC_API_KEY is set but not accepted",
+        "Check the key is current and has credit, or unset it to fall back to a logged-in "
+        "session:  unset ANTHROPIC_API_KEY",
+    ),
+    (
+        "credit balance",
+        "the account has no credit",
+        "Top up the Anthropic account, or use a subscription login instead of an API key.",
+    ),
+    (
+        "please run /login",
+        "no credentials",
+        "Run `parallax login`, or set ANTHROPIC_API_KEY.",
+    ),
+]
+
+
+def bundled_cli() -> Any:
+    """Path to the claude binary that ships inside claude-agent-sdk, if present."""
+    from pathlib import Path
+
+    try:
+        import claude_agent_sdk
+    except ImportError:
+        return None
+    candidate = Path(claude_agent_sdk.__file__).parent / "_bundled" / "claude"
+    return candidate if candidate.exists() else None
+
+
+def diagnose_auth_failure(answer: str, n_tool_calls: int) -> dict[str, Any] | None:
+    """Spot an auth failure that would otherwise read like a one-line answer.
+
+    The underlying CLI reports "Not logged in" or "Invalid API key" as ordinary
+    assistant text and exits cleanly, so without this a user sees a cryptic
+    sentence, zero tool calls, and no indication that nothing actually ran.
+    """
+    if n_tool_calls or not answer:
+        return None
+    lowered = answer.lower()
+    if len(answer) > 400:
+        return None
+    for needle, reason, fix in AUTH_SIGNATURES:
+        if needle in lowered:
+            return {"reason": reason, "message": answer.strip(), "fix": fix}
+    return None
 
 
 def _save_run(result: dict[str, Any]) -> str:

@@ -107,6 +107,25 @@ def ask(
         dump(result)
         return
 
+    problem = result.get("auth_problem")
+    if problem:
+        typer.echo()
+        typer.echo(_c(f"  the agent could not authenticate — {problem['reason']}", RED), err=True)
+        typer.echo(_c(f"  the runtime said: {problem['message']}", DIM), err=True)
+        typer.echo()
+        for line in problem["fix"].splitlines():
+            typer.echo(f"  {line}", err=True)
+        typer.echo()
+        typer.echo(
+            _c(
+                "  Nothing was computed. Every other command (compound, properties, train,\n"
+                "  predict, retro, design, mmpa, lit, cite) needs no model and works now.",
+                DIM,
+            ),
+            err=True,
+        )
+        raise typer.Exit(2)
+
     meta = result.get("meta") or {}
     typer.echo()
     typer.echo(
@@ -119,6 +138,29 @@ def ask(
     )
     if result.get("run_dir"):
         typer.echo(_c(f"  run saved to {result['run_dir']}", DIM))
+
+
+@app.command()
+def login() -> None:
+    """Sign in to Claude, so `parallax ask` works without an API key.
+
+    Uses the claude binary bundled with claude-agent-sdk, so this works even
+    where Claude Code was never installed separately.
+    """
+    import shutil
+    import subprocess
+
+    from .agent.loop import bundled_cli
+
+    executable = shutil.which("claude") or bundled_cli()
+    if not executable:
+        _fail(
+            "no claude binary found. Reinstall the agent runtime with "
+            "`uv pip install -U claude-agent-sdk`, or set ANTHROPIC_API_KEY instead."
+        )
+        return
+    typer.echo(_c(f"  using {executable}", DIM))
+    raise typer.Exit(subprocess.call([str(executable), "/login"]))
 
 
 @app.command()
@@ -684,15 +726,34 @@ def doctor() -> None:
     head("Agent runtime")
     import shutil
 
-    claude_cli = shutil.which("claude")
-    if claude_cli:
-        typer.echo(f"  {_c('✓', GREEN)} claude CLI              {claude_cli}")
-    elif cfg.has_anthropic_key:
-        typer.echo(f"  {_c('✓', GREEN)} ANTHROPIC_API_KEY set")
+    runtime = shutil.which("claude")
+    bundled = None
+    try:
+        import claude_agent_sdk as _sdk
+        from pathlib import Path as _Path
+
+        candidate = _Path(_sdk.__file__).parent / "_bundled" / "claude"
+        bundled = candidate if candidate.exists() else None
+    except Exception:
+        bundled = None
+
+    if runtime:
+        typer.echo(f"  {_c('✓', GREEN)} claude CLI              {runtime}")
+    elif bundled:
+        typer.echo(f"  {_c('✓', GREEN)} claude CLI              bundled with claude-agent-sdk")
+    else:
+        typer.echo(f"  {_c('✗', RED)} no CLI binary found — reinstall claude-agent-sdk")
+
+    if cfg.has_anthropic_key:
+        typer.echo(f"  {_c('✓', GREEN)} credentials             ANTHROPIC_API_KEY is set")
     else:
         typer.echo(
-            f"  {_c('✗', RED)} no agent runtime — install the `claude` CLI or set ANTHROPIC_API_KEY"
+            f"  {_c('—', YELLOW)} credentials             no API key; relies on a logged-in "
+            "session (fine on this machine, needs setup elsewhere)"
         )
+    typer.echo(
+        _c("      only `parallax ask` needs these; every other command runs without a model", DIM)
+    )
     kv("model", cfg.model)
 
     head("Data sources")
