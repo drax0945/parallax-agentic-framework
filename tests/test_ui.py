@@ -73,3 +73,65 @@ class TestGroundingCheck:
 
     def test_empty_answer_is_not_flagged(self):
         assert is_ungrounded("", citations=0, tools_ok=0) is False
+
+
+class TestAnswerRendering:
+    def test_a_table_after_prose_still_renders(self):
+        from parallax.ui.server import render_markdown
+
+        html = render_markdown("Here are the values:\n| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |")
+        assert "<table>" in html
+        assert html.count("<tr>") == 3  # header + two rows
+
+    def test_rows_are_not_split_into_paragraphs(self):
+        from parallax.ui.server import render_markdown
+
+        html = render_markdown("Text:\n| A |\n|---|\n| 1 |\n| 2 |")
+        assert "<table>" in html
+        assert "<p>|" not in html
+
+    def test_heading_after_prose_renders(self):
+        from parallax.ui.server import render_markdown
+
+        assert "<h2>" in render_markdown("Some text.\n## Results\nmore")
+
+    def test_pipes_inside_a_code_fence_are_left_alone(self):
+        from parallax.ui.server import render_markdown
+
+        html = render_markdown("Run:\n```\n| not | a | table |\n```")
+        assert "<table>" not in html
+
+    def test_raw_html_in_the_answer_is_escaped(self):
+        from parallax.ui.server import render_markdown
+
+        assert "<script>" not in render_markdown("<script>alert(1)</script>")
+
+
+class TestStructureExtraction:
+    def test_real_smiles_are_recognised(self):
+        from parallax.ui.server import looks_like_structure
+
+        assert looks_like_structure("CC(=O)Oc1ccccc1C(=O)O")
+        assert looks_like_structure("CCO")
+
+    def test_prose_and_identifiers_are_not_mistaken_for_structures(self):
+        from parallax.ui.server import looks_like_structure
+
+        for text in ("ALK", "the answer is 5", "CHEMBL4247", "", "a potent inhibitor", None):
+            assert not looks_like_structure(text)
+
+    def test_structures_are_collected_from_nested_tool_payloads(self):
+        from parallax.ui.server import collect_structures
+
+        found: dict[str, str] = {}
+        collect_structures(
+            {"rows": [{"smiles": "CC(=O)Oc1ccccc1C(=O)O", "pref_name": "Aspirin"}], "count": 1},
+            found,
+        )
+        assert "CC(=O)Oc1ccccc1C(=O)O" in found
+
+    def test_depiction_returns_svg_or_none(self):
+        from parallax.ui.server import depict
+
+        assert (depict("CC(=O)Oc1ccccc1C(=O)O") or "").lstrip().startswith("<svg")
+        assert depict("not a molecule") is None

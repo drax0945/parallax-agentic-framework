@@ -362,7 +362,7 @@ def run(
 
     return {
         "prompt": prompt,
-        "answer": "\n".join(t for t in texts if t.strip()),
+        "answer": "\n\n".join(t for t in texts if t.strip()),
         "tool_calls": tool_calls_made,
         "n_tool_calls": len(tool_calls_made),
         "citations": len(registry()),

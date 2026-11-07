@@ -167,7 +167,7 @@ async def run_session(
         elif turn.kind == "result":
             meta = turn.payload
 
-    answer = "\n".join(t for t in texts if t.strip())
+    answer = "\n\n".join(t for t in texts if t.strip())
     result = {
         "prompt": prompt,
         "answer": answer,

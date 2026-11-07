@@ -122,6 +122,11 @@ drawer explains the evidence tiers, all 46 tools by group, the 11 skills, modell
 endpoints, optimisation profiles, chemical scope and the limits. That drawer is generated
 from the code, so it cannot drift from what the agent actually does.
 
+Answers come back **structured**, not as a wall of text: markdown is rendered server-side
+so numbers land in real tables with a tier and source column, and every structure the
+agent touches is **drawn** — depicted with RDKit from the SMILES in its tool calls and in
+its prose, shown above the answer.
+
 It also flags an answer as **not grounded** when the prose carries figures but no tool
 call succeeded and nothing was cited — which is what a small local model does after a
 tool rejects its arguments.
@@ -395,7 +400,7 @@ src/parallax/
                    and two interchangeable backends: Claude SDK or any
                    OpenAI-compatible endpoint
 .claude/skills/    11 workflow skills
-tests/            144 tests (`-m network` for the live ones)
+tests/            157 tests (`-m network` for the live ones)
 ```
 
 The 11 skills, which are plain markdown you can read and edit:
