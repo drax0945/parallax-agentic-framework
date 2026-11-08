@@ -140,16 +140,36 @@ main { flex: 1; display: grid; grid-template-columns: minmax(0,1fr) 404px; min-h
 #conversation { overflow-y: auto; padding: 28px 30px 10px; }
 .wrap { max-width: 760px; margin: 0 auto; }
 
-.eyebrow {
-  display: inline-flex; align-items: center; gap: 8px; font-size: 10px;
-  text-transform: uppercase; letter-spacing: .22em; color: var(--faint);
-  font-weight: 500; margin-bottom: 14px;
+.empty { padding-top: 26px; }
+
+/* a quiet nod to the microplate — decoration, not copy */
+.plate {
+  display: grid; grid-template-columns: repeat(12, 1fr); gap: 9px;
+  max-width: 420px; margin: 0 0 28px;
 }
-.eyebrow::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--teal); }
-.empty h2 { color: var(--ink); font-size: 30px; margin: 0 0 10px; font-weight: 450; letter-spacing: -0.055em; line-height: 1.12; }
-.empty h2 em { font-style: normal; color: var(--accent); }
-.empty p { color: var(--muted); font-size: 14.5px; max-width: 56ch; margin: 0; }
-.examples { display: flex; flex-direction: column; gap: 8px; margin-top: 24px; }
+.plate span {
+  aspect-ratio: 1; border-radius: 50%; border: 1px solid var(--line);
+  background: var(--panel);
+}
+.plate span.t { background: color-mix(in srgb, var(--teal) 55%, var(--panel)); border-color: transparent; }
+.plate span.b { background: color-mix(in srgb, var(--blue) 50%, var(--panel)); border-color: transparent; }
+.plate span.l { background: color-mix(in srgb, var(--lav) 50%, var(--panel)); border-color: transparent; }
+.plate span.s { background: color-mix(in srgb, var(--sand) 55%, var(--panel)); border-color: transparent; }
+
+.tierkeys { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 22px; }
+.tierkey {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .14em;
+  color: var(--faint); font-weight: 500;
+  border: 1px solid var(--line-soft); border-radius: 100px; padding: 5px 12px 5px 9px;
+  background: var(--panel);
+}
+.tierkey::before { content: ''; width: 6px; height: 6px; border-radius: 50%; }
+.tierkey[data-t="measured"]::before { background: var(--teal); }
+.tierkey[data-t="computed"]::before { background: var(--blue); }
+.tierkey[data-t="modelled"]::before { background: var(--lav); }
+
+.examples { display: flex; flex-direction: column; gap: 8px; }
 .example {
   text-align: left; background: var(--panel); border: 1px solid var(--line-soft);
   border-radius: var(--r); padding: 12px 15px; cursor: pointer; font-size: 13.5px;
@@ -343,9 +363,12 @@ textarea:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px
   <div id="conversation">
     <div class="wrap" id="thread">
       <div class="empty">
-        <div class="eyebrow">Grounded in experiments</div>
-        <h2>Chemistry that shows<br>its <em>working</em>.</h2>
-        <p>Every number comes back tagged <b>measured</b>, <b>computed</b> or <b>modelled</b>, with the source that produced it. Structures are drawn, not described.</p>
+        <div class="plate" aria-hidden="true"></div>
+        <div class="tierkeys">
+          <span class="tierkey" data-t="measured">measured</span>
+          <span class="tierkey" data-t="computed">computed</span>
+          <span class="tierkey" data-t="modelled">modelled</span>
+        </div>
         <div class="examples">
           <button class="example">Profile lorlatinib and tell me what is measured versus computed</button>
           <button class="example">What is the molecular weight and cLogP of aspirin?</button>
@@ -660,6 +683,18 @@ $('#q').addEventListener('keydown', (e) => {
 document.addEventListener('click', (e) => {
   if (e.target.classList.contains('example')) { $('#q').value = e.target.textContent.trim(); $('#q').focus(); }
 });
+// decorative microplate row; a handful tinted, as on the marque
+(function paintPlate() {
+  const plate = document.querySelector('.plate');
+  if (!plate) return;
+  const tints = { 2: 'b', 5: 's', 8: 't', 10: 'l', 15: 't', 19: 'b', 21: 's' };
+  for (let i = 0; i < 24; i++) {
+    const w = document.createElement('span');
+    if (tints[i]) w.className = tints[i];
+    plate.append(w);
+  }
+})();
+
 $('#provider').addEventListener('change', refreshRuntime);
 refreshRuntime();
 </script>
