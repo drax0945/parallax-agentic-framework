@@ -253,6 +253,23 @@ def _run_agent(question: str, provider: str, events: queue.Queue) -> None:
                         if key in SMILES_KEYS:
                             collect_structures(value, structures, caption=f"input to {turn.tool}")
                     emit("tool_call", tool=turn.tool, args=turn.payload)
+                elif turn.kind == "tool_result":
+                    start = pending.pop(turn.tool or "", None)
+                    ok = not (turn.payload or {}).get("is_error")
+                    outcomes["ok" if ok else "failed"] += 1
+                    body = (turn.payload or {}).get("content") or ""
+                    if ok:
+                        try:
+                            collect_structures(json.loads(body), structures)
+                        except (ValueError, TypeError):
+                            pass
+                    emit(
+                        "tool_result",
+                        tool=turn.tool,
+                        ok=ok,
+                        took=round(time.monotonic() - start, 2) if start else None,
+                        summary=_summarise_text(body),
+                    )
                 elif turn.kind == "text" and turn.text.strip():
                     emit("text", text=turn.text)
 
@@ -340,6 +357,14 @@ def is_ungrounded(answer: str, citations: int, tools_ok: int) -> bool:
     if not answer:
         return False
     return any(ch.isdigit() for ch in answer) and citations == 0 and tools_ok == 0
+
+
+def _summarise_text(body: str) -> str:
+    """Summarise a tool result that arrives as a JSON string."""
+    try:
+        return _summarise(json.loads(body))
+    except (ValueError, TypeError):
+        return (body or "").strip()[:160]
 
 
 def _summarise(payload: Any) -> str:

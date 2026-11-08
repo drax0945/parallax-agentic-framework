@@ -122,6 +122,11 @@ drawer explains the evidence tiers, all 46 tools by group, the 11 skills, modell
 endpoints, optimisation profiles, chemical scope and the limits. That drawer is generated
 from the code, so it cannot drift from what the agent actually does.
 
+While a run is in flight a **side loader** shows that the agentic loop is still going:
+the current phase, elapsed time, and a row of microplate wells that fill as each tool call
+completes — so a 120-second run reads as progress rather than a hang. The reply arrives
+whole at the end, and the loader says so.
+
 Answers come back **structured**, not as a wall of text: markdown is rendered server-side
 so numbers land in real tables with a tier and source column, and every structure the
 agent touches is **drawn** — depicted with RDKit from the SMILES in its tool calls and in
@@ -400,7 +405,7 @@ src/parallax/
                    and two interchangeable backends: Claude SDK or any
                    OpenAI-compatible endpoint
 .claude/skills/    11 workflow skills
-tests/            157 tests (`-m network` for the live ones)
+tests/            163 tests (`-m network` for the live ones)
 ```
 
 The 11 skills, which are plain markdown you can read and edit:

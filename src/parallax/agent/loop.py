@@ -90,6 +90,23 @@ def _options(
     )
 
 
+def _result_text(content: Any) -> str:
+    """Flatten a tool result's content blocks into plain text."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                parts.append(str(item.get("text") or item.get("content") or ""))
+            else:
+                parts.append(str(getattr(item, "text", item)))
+        return "\n".join(p for p in parts if p)
+    return str(content)
+
+
 async def stream_session(
     prompt: str,
     *,
@@ -107,11 +124,17 @@ async def stream_session(
         ThinkingBlock,
         ToolResultBlock,
         ToolUseBlock,
+        UserMessage,
     )
 
     options = _options(model=model, max_turns=max_turns, extra_system=extra_system)
     if resume:
         options.resume = resume
+
+    # Tool results come back on the *user* side of the transcript, keyed by the
+    # id of the call. Without this mapping a consumer sees calls start and never
+    # finish, which is exactly how the console's progress stalled.
+    tool_names: dict[str, str] = {}
 
     async with ClaudeSDKClient(options=options) as client:
         await client.query(prompt)
@@ -123,11 +146,26 @@ async def stream_session(
                     elif isinstance(block, ThinkingBlock):
                         yield Turn(kind="thinking", text=getattr(block, "thinking", ""))
                     elif isinstance(block, ToolUseBlock):
+                        name = str(block.name).replace(f"mcp__{SERVER_NAME}__", "")
+                        if getattr(block, "id", None):
+                            tool_names[block.id] = name
                         yield Turn(
                             kind="tool_use",
-                            tool=str(block.name).replace(f"mcp__{SERVER_NAME}__", ""),
+                            tool=name,
                             payload=dict(block.input or {}),
                         )
+            elif isinstance(message, UserMessage):
+                for block in getattr(message, "content", None) or []:
+                    if not isinstance(block, ToolResultBlock):
+                        continue
+                    yield Turn(
+                        kind="tool_result",
+                        tool=tool_names.get(getattr(block, "tool_use_id", ""), "tool"),
+                        payload={
+                            "is_error": bool(getattr(block, "is_error", False)),
+                            "content": _result_text(getattr(block, "content", None)),
+                        },
+                    )
             elif isinstance(message, ResultMessage):
                 yield Turn(
                     kind="result",
@@ -164,6 +202,8 @@ async def run_session(
             texts.append(turn.text)
         elif turn.kind == "tool_use":
             tool_calls.append({"tool": turn.tool, "input": turn.payload})
+        elif turn.kind == "tool_result":
+            pass  # consumers that care receive it through on_turn
         elif turn.kind == "result":
             meta = turn.payload
 

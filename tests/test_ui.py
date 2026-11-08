@@ -135,3 +135,35 @@ class TestStructureExtraction:
 
         assert (depict("CC(=O)Oc1ccccc1C(=O)O") or "").lstrip().startswith("<svg")
         assert depict("not a molecule") is None
+
+
+class TestClaudeToolResults:
+    """Tool results arrive on the user side of the Claude transcript; without
+    them the console shows calls that start and never finish."""
+
+    def test_result_text_flattens_block_shapes(self):
+        from parallax.agent.loop import _result_text
+
+        assert _result_text("plain") == "plain"
+        assert _result_text([{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]) == "a\nb"
+        assert _result_text(None) == ""
+
+    def test_summarise_text_handles_json_and_prose(self):
+        import json
+
+        from parallax.ui.server import _summarise_text
+
+        assert "180" in _summarise_text(json.dumps({"summary": "MW is 180.16"}))
+        assert _summarise_text("not json at all") == "not json at all"
+        assert _summarise_text("") == ""
+
+    def test_stream_handles_tool_result_turns(self):
+        """run_session must not mistake a tool result for part of the answer."""
+        import inspect
+
+        from parallax.agent import loop
+
+        source = inspect.getsource(loop.run_session)
+        assert "tool_result" in source
+        stream = inspect.getsource(loop.stream_session)
+        assert "UserMessage" in stream and "ToolResultBlock" in stream
