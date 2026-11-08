@@ -43,69 +43,153 @@ a genuine J. Med. Chem. DOI it had never looked up.
 
 ---
 
-## Install
+## Setup
 
-Needs Python 3.11+. Nothing else is required to install: `claude-agent-sdk` ships its own
-`claude` binary, so Claude Code does **not** need to be installed separately.
+Three required steps, then one optional one. Nothing here installs a model or a model
+runtime — those are separate and covered below.
+
+### 1. Install
+
+Needs **Python 3.11+** and nothing else. `claude-agent-sdk` ships its own `claude`
+binary, so Claude Code does **not** have to be installed separately.
 
 ```bash
+git clone https://github.com/drax0945/parallax-agentic-framework.git
+cd parallax-agentic-framework
 uv venv --python 3.12 .venv
 VIRTUAL_ENV=.venv uv pip install -e .
+```
+
+No `uv`? `python3 -m venv .venv && .venv/bin/pip install -e .` works the same.
+
+### 2. Create the workspace
+
+```bash
 .venv/bin/parallax init
+```
+
+Writes `memory/`, `reports/`, `.parallax/` (cache, models, run transcripts), plus
+`.mcp.json` and `.env.example`. Safe to re-run; it will not overwrite what exists.
+
+### 3. Check it
+
+```bash
 .venv/bin/parallax doctor
 ```
 
-`doctor` checks dependencies, the agent runtime, every data source and the memory store.
+Verifies dependencies, the agent runtime, all four data sources and the memory store, and
+names anything missing. **If `doctor` is happy, the chemistry works** — run
+`parallax compound aspirin` to confirm.
 
-### What needs credentials, and what does not
+Running `source .venv/bin/activate` once lets you drop the `.venv/bin/` prefix everywhere.
 
-**No chemistry credentials are ever required.** PubChem, ChEMBL, Europe PMC, Crossref and
-the NCI resolver are free and keyless.
+### 4. Optional — credentials, only for the conversational agent
 
-Only `parallax ask` — the conversational agent — needs to reach a model. Everything else
-(`compound`, `properties`, `train`, `predict`, `retro`, `design`, `mmpa`, `lit`,
-`precedent`, `cite`, `memory`, the MCP server and the whole Python library) is local
-computation over public APIs and runs on a machine with no Claude access at all.
-
-For `parallax ask`, pick any model provider. Claude is the default:
+Everything above works with no account anywhere. Only `parallax ask` and `parallax ui`
+need a model. See **Where things run** below for how to pick one.
 
 ```bash
-parallax login                          # sign in once, uses the bundled binary
-export ANTHROPIC_API_KEY=sk-ant-...     # or an API key
+parallax login                        # Claude, the default
 ```
 
-**Or use any other model, including a free local one.** The agent speaks the
-OpenAI-compatible `/chat/completions` tool-calling protocol, so it runs against Ollama,
-OpenAI, Groq, Together, Mistral, DeepSeek, OpenRouter, vLLM, LM Studio or an enterprise
-gateway — same 46 tools, same 11 skills, same memory.
+---
+
+## Where things run
+
+Three separate places, and it matters which is which.
+
+```
+   YOUR MACHINE                                    THE INTERNET
+┌──────────────────────────────┐
+│  chemistry engine            │
+│    RDKit, scikit-learn       │     read-only     ┌─────────────────────┐
+│    retrosynthesis, MPO       │ ────────────────▶ │ PubChem   ChEMBL    │
+│    memory/  (markdown)       │   cached locally  │ EuropePMC Crossref  │
+│    .parallax/ (models,cache) │ ◀──────────────── │ free, no key        │
+│                              │                   └─────────────────────┘
+│  console  127.0.0.1:8765     │
+│  MCP server (stdio)          │                   ┌─────────────────────┐
+│                              │   only `ask`/`ui` │ Claude / OpenAI /   │
+│  the 46 tools ───────────────│ ────────────────▶ │ Groq / …            │
+│  (no model, ever)            │   prompts + tool  │ needs an account    │
+└──────────────────────────────┘   results         └─────────────────────┘
+            │
+            │ or, with Ollama, the model is on your machine too:
+            └──────▶ localhost:11434   (no account, nothing leaves the box)
+```
+
+**On your machine, always:** every calculation. Structure parsing, descriptors, QSAR
+training and prediction, retrosynthesis, MMPA, multi-parameter scoring, the memory store,
+the citation registry, the console server (bound to `127.0.0.1`, not your network) and the
+MCP server. **None of the 46 tools calls a model.** Verify it yourself:
 
 ```bash
-# fully local and free, no account anywhere
-ollama pull qwen2.5:14b
-parallax ask --provider ollama "Profile lorlatinib"
+grep -rl -e anthropic -e claude_agent_sdk src/parallax/chem src/parallax/sources \
+         src/parallax/models src/parallax/memory src/parallax/agent/tools.py
+# no matches — the chemistry, data, modelling, memory and tool layers never touch an LLM
+```
 
-# or a hosted provider
+The only files that reach a model are `config.py`, `cli.py`, `ui/server.py` and the two
+agent backends.
+
+**Remote, read-only, no credentials:** the chemistry databases. Responses are cached under
+`.parallax/cache/` keyed by the full request, so a repeat analysis is fast and reproducible.
+`PARALLAX_OFFLINE=1` forbids new requests and serves only the cache.
+
+**Remote, only when you use the agent:** the model. It receives your question, the tool
+descriptions and the tool *results* — so database records and computed values do travel to
+whichever provider you choose. With Ollama they do not leave your machine.
+
+### How each model backend works
+
+| Backend | Where the model runs | What it needs | How it is reached |
+|---|---|---|---|
+| **claude** (default) | Anthropic's servers | `parallax login`, or `ANTHROPIC_API_KEY` | the bundled `claude` binary, spawned as a subprocess |
+| **ollama** | **your machine** | Ollama installed + a model pulled | HTTP to `localhost:11434` |
+| openai, groq, together, mistral, deepseek, openrouter | that provider's servers | their API key | HTTPS to their `/chat/completions` |
+| anything else | wherever you host it | `PARALLAX_LLM_BASE_URL` | same protocol |
+
+**Claude.** `parallax login` opens a browser sign-in and stores credentials in your OS
+keychain; the SDK then spawns the bundled binary per request. An `ANTHROPIC_API_KEY` is
+used instead when set. Usage counts against whichever you authenticated with.
+
+**Ollama.** Parallax never installs or pulls anything — you do that yourself:
+
+```bash
+brew install ollama          # or https://ollama.com/download
+ollama pull qwen2.5:14b      # llama3.1 and mistral-nemo also handle tools well
+parallax ask --provider ollama "Profile lorlatinib"
+```
+
+Parallax asks the local daemon which models are installed and picks a tool-capable one, so
+it will not default to something you do not have. Nothing leaves your machine.
+
+**Any other provider.** Set its key and name it:
+
+```bash
 export GROQ_API_KEY=...
 parallax ask --provider groq "Build an ALK model"
 
-# or anything else that speaks the protocol
-export PARALLAX_LLM_BASE_URL=https://my-gateway/v1
+export PARALLAX_LLM_BASE_URL=https://my-gateway/v1   # vLLM, LM Studio, Azure, …
 export PARALLAX_LLM_MODEL=my-model
 ```
 
-`parallax providers` lists what is configured. Set `PARALLAX_LLM_PROVIDER` to make a
-choice permanent.
+`parallax providers` shows what is configured; `PARALLAX_LLM_PROVIDER` makes a choice
+permanent. The console's header badge always names the model actually answering, and turns
+red when it cannot be reached.
 
-A caveat worth stating: the discipline here — separating measured from computed from
-modelled, refusing out-of-domain predictions, never inventing a citation — is enforced
-partly by the tools and partly by the model following instructions. A small local model
-follows them less reliably than a frontier one. The tools still refuse to fabricate and
-`audit_draft` still catches invented references, so the floor holds; the ceiling depends
-on the model you point it at.
+If no model is set up, `parallax ask` exits with a diagnosis and the fix — the underlying
+runtime reports "Not logged in" as ordinary assistant text, which is easy to mistake for an
+answer.
 
-If neither is set up, `parallax ask` exits with a clear diagnosis rather than a cryptic
-one-line reply — the underlying runtime reports "Not logged in" as ordinary assistant
-text, which is easy to mistake for an answer.
+### One caveat about model choice
+
+The discipline here — separating measured from computed from modelled, refusing
+out-of-domain predictions, never inventing a citation — is enforced partly by the tools and
+partly by the model following instructions. A small local model follows them less reliably
+than a frontier one. The tools still refuse to fabricate, `audit_draft` still catches
+invented references, and the console flags an answer as **not grounded** when no tool call
+succeeded. The floor holds whatever you run; the ceiling depends on the model.
 
 ---
 
