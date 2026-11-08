@@ -38,6 +38,9 @@
 
   --mono: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --sans: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, sans-serif;
+  --well-empty: #edf4f8;
+  --well-ring: #c0d4de;
+  --select: #3d91ab;
   --r: 14px;
   --shadow: 0 1px 2px rgba(7,52,84,.04), 0 8px 24px -12px rgba(7,52,84,.14);
 }
@@ -51,6 +54,7 @@
     --warn: #d6b770; --warn-soft: #2d2616;
     --err: #e08b8b; --err-soft: #331b1d;
     --ok: #72bfc4;
+    --well-empty: #102d42; --well-ring: rgba(129,155,169,.42); --select: #72bfc4;
     --shadow: 0 1px 2px rgba(0,0,0,.2), 0 8px 24px -12px rgba(0,0,0,.5);
   }
 }
@@ -142,19 +146,20 @@ main { flex: 1; display: grid; grid-template-columns: minmax(0,1fr) 404px; min-h
 
 .empty { padding-top: 26px; }
 
-/* a quiet nod to the microplate — decoration, not copy */
+/* a quiet nod to the microplate — decoration, not copy.
+   Bead gradients and ring colours lifted from the marque. */
 .plate {
-  display: grid; grid-template-columns: repeat(12, 1fr); gap: 9px;
-  max-width: 420px; margin: 0 0 28px;
+  display: grid; grid-template-columns: repeat(12, 1fr); gap: 10px;
+  max-width: 430px; margin: 0 0 30px;
 }
-.plate span {
-  aspect-ratio: 1; border-radius: 50%; border: 1px solid var(--line);
-  background: var(--panel);
+.plate span, .well {
+  aspect-ratio: 1; border-radius: 50%;
+  border: 1px solid var(--well-ring); background: var(--well-empty);
 }
-.plate span.t { background: color-mix(in srgb, var(--teal) 55%, var(--panel)); border-color: transparent; }
-.plate span.b { background: color-mix(in srgb, var(--blue) 50%, var(--panel)); border-color: transparent; }
-.plate span.l { background: color-mix(in srgb, var(--lav) 50%, var(--panel)); border-color: transparent; }
-.plate span.s { background: color-mix(in srgb, var(--sand) 55%, var(--panel)); border-color: transparent; }
+.plate span.t { background: radial-gradient(circle at 30% 25%, #cce7e6, #83bcc1); border-color: #9cc7cb; }
+.plate span.b { background: radial-gradient(circle at 30% 25%, #cfe2ee, #6ba5c3); border-color: #9cbcd0; }
+.plate span.l { background: radial-gradient(circle at 30% 25%, #dedeef, #9d9dcd); border-color: #b8b8d8; }
+.plate span.s { background: radial-gradient(circle at 30% 25%, #ece1c2, #d4bf80); border-color: #d0c198; }
 
 .tierkeys { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 22px; }
 .tierkey {
@@ -172,10 +177,13 @@ main { flex: 1; display: grid; grid-template-columns: minmax(0,1fr) 404px; min-h
 .examples { display: flex; flex-direction: column; gap: 8px; }
 .example {
   text-align: left; background: var(--panel); border: 1px solid var(--line-soft);
-  border-radius: var(--r); padding: 12px 15px; cursor: pointer; font-size: 13.5px;
-  color: var(--muted); transition: all .15s ease;
+  border-radius: var(--r); padding: 13px 16px; cursor: pointer; font-size: 13.5px;
+  color: var(--muted); transition: border-color .18s ease, box-shadow .18s ease, color .18s ease;
 }
-.example:hover { border-color: var(--teal); color: var(--ink); transform: translateX(2px); }
+.example:hover {
+  border-color: #9cc7cb; color: var(--ink);
+  box-shadow: 0 0 0 4px rgba(124,185,201,.09), 0 6px 18px -12px rgba(7,52,84,.35);
+}
 
 .turn { margin-bottom: 30px; }
 .question {
@@ -262,12 +270,19 @@ textarea:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px
 #loader { border-bottom: 1px solid var(--line); padding: 16px; background: var(--panel); }
 #loader[hidden] { display: none; }
 .loader-top { display: flex; align-items: center; gap: 11px; }
-.spinner { width: 30px; height: 30px; flex: none; position: relative; }
-.spinner svg { width: 100%; height: 100%; animation: rot 2.4s linear infinite; }
+.spinner { width: 30px; height: 30px; flex: none; position: relative; display: grid; place-items: center; }
+.spinner::before {
+  content: ''; position: absolute; inset: 0; border-radius: 50%;
+  border: 1px dashed rgba(98,158,175,.55); animation: rot 7s linear infinite;
+}
+.spinner::after {
+  content: ''; width: 13px; height: 13px; border-radius: 50%;
+  border: 2px solid var(--select);
+  box-shadow: 0 0 0 5px rgba(124,185,201,.09), 0 0 22px 0 rgba(99,169,191,.45);
+  animation: breathe 1.8s ease-in-out infinite;
+}
 @keyframes rot { to { transform: rotate(360deg); } }
-.spinner circle { fill: none; stroke-width: 2.5; }
-.spinner .track { stroke: var(--line); }
-.spinner .arc { stroke: var(--teal); stroke-linecap: round; stroke-dasharray: 20 60; }
+@keyframes breathe { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.14); opacity: .78; } }
 .loader-text { min-width: 0; }
 .loader-phase { font-size: 13px; font-weight: 500; letter-spacing: -0.01em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -275,20 +290,20 @@ textarea:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px
 .loader-time { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--muted); flex: none; }
 
 /* a row of microplate wells, one per step of the loop */
-.wells { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 13px; }
-.well {
-  width: 13px; height: 13px; border-radius: 50%;
-  border: 1.5px solid var(--line); background: var(--panel); flex: none;
-  transition: all .25s ease;
-}
-.well.done { background: var(--teal); border-color: var(--teal); }
-.well.failed { background: var(--err); border-color: var(--err); }
+.wells { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 15px; padding: 1px 0; }
+.well { width: 13px; height: 13px; flex: none; position: relative; transition: all .3s ease; }
+.well.done { background: radial-gradient(circle at 30% 25%, #cce7e6, #83bcc1); border-color: #9cc7cb; }
+.well.failed { background: radial-gradient(circle at 30% 25%, #f0cdcd, #c98080); border-color: #d9a9a9; }
 .well.active {
-  border-color: var(--teal); background: var(--panel);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 22%, transparent);
-  animation: breathe 1.4s ease-in-out infinite;
+  border: 2px solid var(--select); background: transparent;
+  box-shadow: 0 0 0 5px rgba(124,185,201,.09), 0 0 25px 0 rgba(99,169,191,.5);
 }
-@keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.22); } }
+/* the dashed orbit the marque draws around a chosen well */
+.well.active::after {
+  content: ''; position: absolute; inset: -6px; border-radius: 50%;
+  border: 1px dashed rgba(98,158,175,.55); animation: orbit 7s linear infinite;
+}
+@keyframes orbit { to { transform: rotate(360deg); } }
 .loader-note { margin-top: 11px; font-size: 11.5px; color: var(--faint); line-height: 1.45; }
 
 .log-head {
@@ -297,13 +312,14 @@ textarea:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px
   letter-spacing: .18em; color: var(--faint); font-weight: 500;
 }
 .live { width: 6px; height: 6px; border-radius: 50%; background: var(--line); }
-.live.on { background: var(--teal); animation: pulse 1.3s ease-in-out infinite; }
+.live.on { background: var(--select); box-shadow: 0 0 0 3px rgba(124,185,201,.18);
+  animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .22; } }
 .log-count { margin-left: auto; font-family: var(--mono); letter-spacing: 0; text-transform: none; font-size: 11.5px; }
 #entries { flex: 1; overflow-y: auto; padding: 11px 13px; font-family: var(--mono); font-size: 11.5px; }
 .entry { padding: 9px 11px; border-radius: 11px; margin-bottom: 7px;
   background: var(--panel); border: 1px solid var(--line-soft); }
-.entry.pending { border-color: var(--teal); box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 10%, transparent); }
+.entry.pending { border-color: #9cc7cb; box-shadow: 0 0 0 4px rgba(124,185,201,.09); }
 .entry.failed { border-color: var(--err); background: var(--err-soft); }
 .entry-top { display: flex; align-items: baseline; gap: 8px; }
 .tname { color: var(--accent); font-weight: 500; }
@@ -382,12 +398,7 @@ textarea:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px
   <aside id="rail">
     <div id="loader" hidden>
       <div class="loader-top">
-        <div class="spinner">
-          <svg viewBox="0 0 36 36" aria-hidden="true">
-            <circle class="track" cx="18" cy="18" r="15"></circle>
-            <circle class="arc" cx="18" cy="18" r="15"></circle>
-          </svg>
-        </div>
+        <div class="spinner" aria-hidden="true"></div>
         <div class="loader-text">
           <div class="loader-phase" id="loader-phase">Starting</div>
           <div class="loader-sub" id="loader-sub">agentic loop running</div>
