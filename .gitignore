@@ -6,16 +6,25 @@ __pycache__/
 .env
 
 # Parallax runtime state: caches, trained models, run transcripts, audit log.
-# Memory and reports are deliberately NOT ignored — they are the durable output.
 .parallax/cache/
 .parallax/models/
 .parallax/runs/
 .parallax/safety-audit.jsonl
+
+# Workspace data — the lab's, not the repo's.
+#
+# `logbook/` holds real experiments and `memory/` holds what the agent concluded
+# from them. Both are specific to whoever is running Parallax, and neither is
+# something a clone should inherit: a shipped logbook entry would be read as
+# in-house precedent by somebody else's agent, which is exactly wrong.
+# Both directories are created on first use, so a fresh clone starts empty.
+#
+# This also keeps test and demo runs out of the repository.
+logbook/
+memory/
 
 # IDE
 .idea/
 .vscode/
 .DS_Store
 
-# Logbook search index — a cache, rebuilt from entries/ on demand
-logbook/.index/
