@@ -202,7 +202,7 @@ parallax ui
 A local web console at `http://127.0.0.1:8765`. Ask in plain language and watch every
 tool call stream in as it runs, with real durations and pass/fail state. The header shows
 which model is answering — Claude or a local Ollama model — and a **What can it do?**
-drawer explains the evidence tiers, all 46 tools by group, the 11 skills, modellable
+drawer explains the evidence tiers, all 50 tools by group, the 11 skills, modellable
 endpoints, optimisation profiles, chemical scope and the limits. That drawer is generated
 from the code, so it cannot drift from what the agent actually does.
 
