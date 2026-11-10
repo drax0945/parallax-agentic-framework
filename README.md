@@ -538,7 +538,7 @@ src/parallax/
                    and two interchangeable backends: Claude SDK or any
                    OpenAI-compatible endpoint
 .claude/skills/    11 workflow skills
-tests/            184 tests (`-m network` for the live ones)
+tests/            172 tests (`-m network` for the live ones)
 ```
 
 The 11 skills, which are plain markdown you can read and edit:
