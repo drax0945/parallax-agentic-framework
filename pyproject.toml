@@ -8,19 +8,19 @@ version = "0.1.0"
 description = "Agentic cheminformatics framework: skills, continual memory, cited predictions and synthesis reasoning"
 readme = "README.md"
 requires-python = ">=3.11"
+# Every entry here is imported somewhere in src/parallax. Checked, not assumed:
+# `markdown` was missing while being imported by report.py and ui/server.py, so a
+# clean install crashed on the first report and on every page of the console. Five
+# others were declared and never imported.
 dependencies = [
-    "rdkit>=2024.3",
-    "httpx>=0.27",
-    "scikit-learn>=1.4",
-    "pandas>=2.2",
-    "numpy>=1.26",
-    "pydantic>=2.6",
-    "typer>=0.12",
-    "jinja2>=3.1",
-    "tenacity>=8.2",
-    "mcp>=1.2",
-    "claude-agent-sdk>=0.2",
-    "anthropic>=0.40",
+    "rdkit>=2024.3",          # chem/ throughout: structures, descriptors, reactions
+    "numpy>=1.26",            # qsar features, logbook fingerprint matrix
+    "scikit-learn>=1.4",      # models/qsar.py: ridge, random forest, gradient boosting
+    "httpx>=0.27",            # net.py, and the OpenAI-compatible backend
+    "markdown>=3.5",          # report.py and ui/server.py render answers server-side
+    "typer>=0.12",            # cli.py
+    "mcp>=1.2",               # agent/mcp_server.py, the stdio server
+    "claude-agent-sdk>=0.2",  # agent/loop.py, the Claude backend
 ]
 
 [project.optional-dependencies]
