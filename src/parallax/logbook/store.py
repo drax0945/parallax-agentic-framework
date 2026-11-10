@@ -36,36 +36,6 @@ _generator = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
 
 SLUG_RE = re.compile(r"[^a-z0-9]+")
 
-# Condition keys get normalised so that "what catalyst did we use" is answerable
-# across entries typed by different people. Anything not listed here is kept
-# verbatim — this normalises spelling, it does not restrict what can be recorded.
-CONDITION_ALIASES = {
-    "cat": "catalyst",
-    "catalyst_system": "catalyst",
-    "pd_source": "catalyst",
-    "metal": "catalyst",
-    "lig": "ligand",
-    "phosphine": "ligand",
-    "solv": "solvent",
-    "temp": "temperature",
-    "t": "temperature",
-    "rxn_time": "time",
-    "duration": "time",
-    "equiv": "equivalents",
-    "eq": "equivalents",
-    "conc": "concentration",
-    "atmosphere": "atmosphere",
-    "workup": "workup",
-}
-
-# The conditions worth asking for by name, in the order a chemist would write
-# them. Used in the tool description so the agent records them as separate keys
-# rather than burying them in prose, which is what makes them retrievable.
-CONDITION_KEYS = (
-    "catalyst", "ligand", "reagent", "base", "solvent", "temperature",
-    "time", "equivalents", "concentration", "atmosphere", "workup",
-)
-
 MONTHS = (
     "january", "february", "march", "april", "may", "june",
     "july", "august", "september", "october", "november", "december",
@@ -76,15 +46,19 @@ def _slug(text: str, limit: int = 44) -> str:
     return SLUG_RE.sub("-", (text or "").lower()).strip("-")[:limit] or "entry"
 
 
-def normalise_conditions(conditions: dict[str, Any] | None) -> dict[str, Any]:
-    """Lower-case condition keys and fold common abbreviations onto one spelling."""
-    if not conditions:
-        return {}
-    out: dict[str, Any] = {}
-    for key, value in conditions.items():
-        clean = SLUG_RE.sub("_", str(key).lower()).strip("_")
-        out[CONDITION_ALIASES.get(clean, clean)] = value
-    return out
+def _flatten(value: Any) -> list[str]:
+    """Every scalar inside a value, as strings, keys included."""
+    if value is None or isinstance(value, bool):
+        return []
+    if isinstance(value, dict):
+        out: list[str] = []
+        for key, item in value.items():
+            out.append(str(key))
+            out.extend(_flatten(item))
+        return out
+    if isinstance(value, (list, tuple, set)):
+        return [s for item in value for s in _flatten(item)]
+    return [str(value)]
 
 
 def date_tokens(date: str | None) -> list[str]:
@@ -159,16 +133,27 @@ class Experiment:
     links: dict[str, Any] = field(default_factory=dict)
     created: str = field(default_factory=utcnow)
 
+    # Structures are matched by fingerprint, not by text, and these carry no
+    # words anyone would search for.
+    _NOT_TEXT = frozenset(
+        {"id", "created", "reaction_smiles", "product_smiles", "reactant_smiles"}
+    )
+
     def searchable(self) -> str:
-        condition_text = " ".join(f"{k} {v}" for k, v in self.conditions.items())
-        return " ".join(
-            [
-                self.title, self.title, self.transform or "", condition_text,
-                self.observations, self.analysis or "", self.project or "",
-                " ".join(self.tags), self.outcome, self.operator or "",
-                self.scale or "", *date_tokens(self.date),
-            ]
-        )
+        """Every recorded detail, as text.
+
+        Field-agnostic on purpose: whatever a lab chooses to record — in
+        `conditions`, in `links`, in a field added later — becomes reachable by
+        the words used to write it. Keys are included alongside values, so
+        asking about a field by name finds the entries that have it.
+        """
+        parts = [self.title]  # once here and once from the fields below: it is the label
+        for name, value in asdict(self).items():
+            if name in self._NOT_TEXT:
+                continue
+            parts.extend(_flatten(value))
+        parts.extend(date_tokens(self.date))
+        return " ".join(p for p in parts if p)
 
     def one_line(self) -> str:
         bits = [self.date, self.outcome.upper()]
@@ -249,7 +234,7 @@ class Experiment:
             reactant_smiles=_as_list(meta.get("reactant_smiles")),
             yield_percent=yield_percent,
             scale=meta.get("scale") or None,
-            conditions=normalise_conditions(meta.get("conditions")),
+            conditions=dict(meta.get("conditions") or {}),
             observations=body,
             analysis=meta.get("analysis") or None,
             project=meta.get("project") or None,
@@ -431,7 +416,7 @@ class LogbookStore:
             reactant_smiles=reactants,
             yield_percent=yield_percent,
             scale=scale,
-            conditions=normalise_conditions(conditions),
+            conditions=dict(conditions or {}),
             observations=observations.strip(),
             analysis=analysis,
             project=project,
@@ -604,6 +589,11 @@ class LogbookStore:
                     "project": summary.project,
                     "relevance": round(score, 3),
                     "matched_on": why,
+                    # Every field as recorded, so any question about this run can
+                    # be answered from the record rather than from the summary
+                    # above. The keys are whatever the lab wrote; nothing is
+                    # renamed, dropped or inferred on the way out.
+                    "record": asdict(entry) if entry else {},
                 }
             )
 
@@ -632,8 +622,9 @@ class LogbookStore:
                 )
                 + "These are observations from this lab: they outrank published precedent "
                 "here, but each is a single run — check the counts before treating one as "
-                "a rule. Conditions are quoted as recorded; an absent key means the "
-                "logbook does not record it."
+                "a rule. Each hit's `record` is the entry exactly as written — every field, "
+                "with the lab's own field names. Quote from it; a field that is absent is "
+                "one the logbook does not record, which is not the same as a value of none."
             ),
         }
 

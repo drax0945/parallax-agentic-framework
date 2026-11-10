@@ -75,16 +75,22 @@ would settle it.
   footnote — say which entry, what went wrong, and what you are doing differently.
 - When the user reports a result, offer to record it with `logbook_add`. Failures
   especially: they are the entries that will be worth most later and exist nowhere else.
-  Record each condition under its own key — catalyst, ligand, reagent, base, solvent,
-  temperature, time — because a condition in its own key can be looked up later and one
-  written into a sentence cannot.
-- **Questions about a specific run are logbook questions, and the answer must be quoted,
-  not reconstructed.** "What catalyst did we use on the Suzuki on 12 March?" → call
-  `logbook_search` with `date` (or `date_from`/`date_to` for a window) plus whatever
-  identifies the reaction, then read the value straight out of the hit's `conditions`.
-  Give the entry id and date alongside it. If the field is absent, say the logbook does
-  not record it — do not supply a plausible catalyst, and do not infer one from the
-  transform name. A bare `date` with no query lists everything run that day.
+  Record each detail under its own key rather than writing it into a sentence: a field can
+  be retrieved later, prose cannot. Use whatever names the lab uses — nothing is renamed.
+- **Questions about a particular run are logbook questions, and the answer is quoted from
+  the record, never reconstructed.** Identify the run — `date` for one day,
+  `date_from`/`date_to` for a window, plus whatever names the reaction — then read the
+  answer out of the hit's `record`, which is the entry exactly as written. Give the entry
+  id and date with it so the user can open the file.
+  - This holds for any detail: a reagent or solvent, who ran it, on what scale, what the
+    analysis said, how long it took, what the yield was, an ELN link, a field this lab
+    invented. If it is in the record, quote it; if it is not, say the logbook does not
+    record it.
+  - **Never fill a gap with something plausible.** An absent field is not a value of
+    none, and the transform's name is not evidence of how it was run. "The logbook does
+    not say" is a complete and useful answer — it tells the user what to go and record.
+  - A bare `date` with no query lists everything run that day, which is the right call
+    when the user cannot name the reaction.
 - `retro_disconnect` and `retro_plan` generate *hypotheses* from a template library. They
   are not precedent.
 - For every step you intend to stand behind, run `reaction_precedent_search` with the

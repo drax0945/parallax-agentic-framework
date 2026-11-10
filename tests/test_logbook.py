@@ -226,29 +226,36 @@ class TestIndexScaling:
 
 @pytest.fixture()
 def dated_book(tmp_path):
-    """Three runs on three days, with conditions recorded field by field."""
+    """Three runs on three days, each recording a different set of details.
+
+    The field names are deliberately inconsistent — `catalyst` in one entry,
+    `cat` in another, `stir rate` and `eln` in a third. A logbook does not get
+    to dictate vocabulary, and retrieval must not depend on one.
+    """
     store = LogbookStore(root=tmp_path / "dated")
     store.add(
         title="Suzuki on the chloropyridine core", outcome="success", yield_percent=64,
-        date="2026-03-12", operator="RK",
+        date="2026-03-12", operator="RK", scale="250 mg",
         reaction_smiles="Clc1ccncc1.OB(O)c1ccccc1>>c1ccc(-c2ccncc2)cc1",
         transform="Suzuki-Miyaura coupling",
         conditions={"catalyst": "Pd(OAc)2", "ligand": "SPhos", "base": "K3PO4",
-                    "solvent": "dioxane/water", "temperature": "100 C"},
-        observations="Full conversion in 3 h.", project="ALK series",
+                    "solvent": "dioxane/water", "temperature": "100 C", "time": "3 h"},
+        observations="Full conversion in 3 h.", analysis="LCMS, single peak",
+        project="ALK series", links={"eln": "ELN-4471"},
     )
     store.add(
-        title="Suzuki retry with a bulkier ligand", outcome="failure",
-        date="2026-03-14", operator="RK",
+        title="Suzuki retry on a bigger scale", outcome="failure",
+        date="2026-03-14", operator="RK", scale="12 g",
         reaction_smiles="Clc1ccncc1.OB(O)c1ccccc1>>c1ccc(-c2ccncc2)cc1",
         transform="Suzuki-Miyaura coupling",
-        conditions={"cat": "Pd2(dba)3", "lig": "XPhos", "solv": "toluene", "temp": "110 C"},
+        conditions={"cat": "Pd2(dba)3", "solv": "toluene", "stir rate": "600 rpm",
+                    "degassing": "three freeze-pump-thaw cycles"},
         observations="Protodeboronation dominated.", project="ALK series",
     )
     store.add(
         title="Buchwald amination of the same core", outcome="success", yield_percent=52,
         date="2026-04-02", operator="JD", transform="Buchwald-Hartwig amination",
-        conditions={"catalyst": "Pd(OAc)2", "ligand": "BrettPhos", "base": "NaOtBu"},
+        conditions={"catalyst": "Pd(OAc)2", "base": "NaOtBu"},
         project="ALK series",
     )
     return store
@@ -278,21 +285,41 @@ class TestDateAddressableRecords:
         assert dated_book.search(date_from="2026-04-01")["n_results"] == 1
         assert dated_book.search(date_to="2026-03-12")["n_results"] == 1
 
-    def test_the_catalyst_question_is_answerable_from_the_hit(self, dated_book):
-        """The question this exists for: which catalyst, on which date."""
+    def test_a_dated_hit_carries_the_whole_record(self, dated_book):
+        """Any question about a run, answered from the record rather than guessed."""
         hits = dated_book.search("Suzuki", date="2026-03-12")["results"]
         assert len(hits) == 1
-        conditions = hits[0]["conditions"]
-        assert conditions["catalyst"] == "Pd(OAc)2"
-        assert conditions["ligand"] == "SPhos"
-        assert hits[0]["operator"] == "RK"
+        record = hits[0]["record"]
+
+        # whatever was asked about, it is in there, under the name it was written
+        assert record["conditions"]["catalyst"] == "Pd(OAc)2"
+        assert record["conditions"]["time"] == "3 h"
+        assert record["operator"] == "RK"
+        assert record["scale"] == "250 mg"
+        assert record["yield_percent"] == 64
+        assert record["analysis"] == "LCMS, single peak"
+        assert record["links"]["eln"] == "ELN-4471"
+        assert record["date"] == "2026-03-12"
+
+    def test_the_record_is_the_entry_and_nothing_added(self, dated_book):
+        from dataclasses import asdict
+
+        hit = dated_book.search(date="2026-04-02")["results"][0]
+        assert hit["record"] == asdict(dated_book.get(hit["id"]))
+
+    def test_an_absent_field_is_absent_not_invented(self, dated_book):
+        """The Buchwald entry records no solvent. Nothing may supply one."""
+        record = dated_book.search(date="2026-04-02")["results"][0]["record"]
+        assert "solvent" not in record["conditions"]
+        assert record["scale"] is None
+        assert record["conditions"] == {"catalyst": "Pd(OAc)2", "base": "NaOtBu"}
 
     def test_a_date_narrows_an_otherwise_ambiguous_query(self, dated_book):
         """Two Suzukis on the same substrate; the date separates them."""
         both = dated_book.search(transform="Suzuki-Miyaura coupling")["results"]
         assert len(both) == 2
         one = dated_book.search(transform="Suzuki-Miyaura coupling", date="2026-03-14")["results"]
-        assert len(one) == 1 and one[0]["conditions"]["ligand"] == "XPhos"
+        assert len(one) == 1 and one[0]["conditions"]["cat"] == "Pd2(dba)3"
 
     def test_a_date_filter_combines_with_outcome(self, dated_book):
         result = dated_book.search(date_from="2026-03-01", date_to="2026-03-31", outcome="failure")
@@ -314,40 +341,73 @@ class TestDateAddressableRecords:
         assert dated_book.search(date="2026-03-13")["n_results"] == 0
 
 
-class TestConditionKeys:
-    def test_abbreviations_are_folded_onto_one_spelling(self, dated_book):
-        hits = dated_book.search(date="2026-03-14")["results"]
-        conditions = hits[0]["conditions"]
-        assert conditions["catalyst"] == "Pd2(dba)3"   # recorded as 'cat'
-        assert conditions["ligand"] == "XPhos"         # recorded as 'lig'
-        assert conditions["solvent"] == "toluene"      # recorded as 'solv'
-        assert conditions["temperature"] == "110 C"    # recorded as 'temp'
-        assert "cat" not in conditions and "lig" not in conditions
+class TestTheRecordIsNotRewritten:
+    """A logbook entry is a primary record. Nothing renames what a lab wrote."""
 
-    def test_an_unknown_key_is_kept_verbatim(self, tmp_path):
+    def test_keys_are_stored_exactly_as_given(self, tmp_path):
         store = LogbookStore(root=tmp_path / "lb")
-        store.add(title="x", outcome="success", conditions={"microwave power": "150 W"})
-        assert store.all_entries()[0].conditions["microwave_power"] == "150 W"
+        store.add(
+            title="x", outcome="success",
+            conditions={"microwave power": "150 W", "Cat": "CuI", "pH": "7.40"},
+        )
+        conditions = store.all_entries()[0].conditions
+        assert conditions == {"microwave power": "150 W", "Cat": "CuI", "pH": "7.40"}
 
-    def test_hand_written_keys_are_normalised_on_read(self, dated_book):
-        """A chemist editing the markdown by hand still gets found."""
+    def test_a_number_keeps_the_figures_it_was_written_with(self, tmp_path):
+        """Conditions round-trip as written text, deliberately.
+
+        Coercing `7.40` to a float would return `7.4` and throw away a
+        significant figure the chemist chose. A primary record comes back the
+        way it went in; the typed fields (`yield_percent`) are where numbers
+        are numbers.
+        """
+        store = LogbookStore(root=tmp_path / "lb")
+        store.add(title="x", outcome="success", yield_percent=64,
+                  conditions={"pH": 7.40, "equiv": 1.50})
+        entry = LogbookStore(root=store.root).all_entries()[0]
+        assert entry.conditions == {"pH": "7.4", "equiv": "1.5"}  # as python wrote them
+        assert entry.yield_percent == 64.0  # a typed field stays a number
+
+    def test_hand_written_keys_survive_a_reload(self, dated_book):
+        """A chemist editing the markdown keeps their own field names."""
         target = next(dated_book.entries_dir.glob("*buchwald*.md"))
         target.write_text(
-            target.read_text(encoding="utf-8").replace("  catalyst: Pd(OAc)2", "  Cat: Pd(OAc)2"),
+            target.read_text(encoding="utf-8").replace(
+                "  catalyst: Pd(OAc)2", "  Pd source: Pd(OAc)2"
+            ),
             encoding="utf-8",
         )
-        hits = LogbookStore(root=dated_book.root).search(date="2026-04-02")["results"]
-        assert hits[0]["conditions"]["catalyst"] == "Pd(OAc)2"
+        hit = LogbookStore(root=dated_book.root).search(date="2026-04-02")["results"][0]
+        assert hit["conditions"]["Pd source"] == "Pd(OAc)2"
+        assert "catalyst" not in hit["conditions"]
 
-    def test_the_condition_keys_are_named_for_the_agent(self):
-        from parallax.logbook import CONDITION_KEYS
+    def test_a_field_name_this_lab_invented_is_searchable(self, dated_book):
+        """Whatever a lab records becomes reachable by the words it used."""
+        for term in ("stir rate", "degassing", "freeze-pump-thaw", "ELN-4471"):
+            assert dated_book.search(term)["n_results"] >= 1, term
 
-        assert "catalyst" in CONDITION_KEYS and "ligand" in CONDITION_KEYS
+    def test_searching_by_a_field_name_finds_entries_that_have_it(self, dated_book):
+        hits = dated_book.search("degassing")["results"]
+        assert len(hits) == 1 and hits[0]["date"] == "2026-03-14"
 
-    def test_the_prompt_forbids_inventing_a_catalyst(self):
+    def test_every_recorded_field_reaches_the_text_index(self):
+        from parallax.logbook.store import Experiment
+
+        text = Experiment(
+            id="x", title="t", outcome="success", date="2026-03-12",
+            operator="RK", scale="12 g", analysis="NMR clean",
+            conditions={"odd key": "odd value"}, links={"eln": "ELN-1"},
+            tags=["scaleup"], observations="worked",
+        ).searchable()
+        for fragment in ("RK", "12 g", "NMR clean", "odd key", "odd value",
+                         "eln", "ELN-1", "scaleup", "worked"):
+            assert fragment in text, fragment
+
+    def test_the_prompt_forbids_filling_a_gap_with_something_plausible(self):
         from parallax.agent.prompts import SYSTEM_PROMPT
 
-        assert "do not supply a plausible catalyst" in SYSTEM_PROMPT
+        assert "Never fill a gap with something plausible" in SYSTEM_PROMPT
+        assert "quoted from" in SYSTEM_PROMPT
 
 
 class TestDateTokens:

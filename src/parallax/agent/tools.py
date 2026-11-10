@@ -1450,12 +1450,14 @@ TOOLS: list[Tool] = [
         "when the wording differs. **Call this before proposing any synthetic step or "
         "design.** In-house results outrank published precedent for this lab, and failures "
         "recorded here exist nowhere in the literature.\n\n"
-        "It also answers questions about a specific run: pass `date` for one day, or "
-        "`date_from`/`date_to` for a window, and the hits come back with their full "
-        "`conditions` — catalyst, ligand, reagent, base, solvent, temperature, time — plus "
-        "operator, scale and analysis. Filters alone are a valid query: `date` with no "
-        "search text lists everything run that day, newest first. Read the catalyst or "
-        "ligand off `conditions`; never infer it from the title.",
+        "It also answers questions about one particular run. Pass `date` for a single day "
+        "or `date_from`/`date_to` for a window, alone or alongside a query, and each hit "
+        "carries `record`: the entry exactly as written, every field, under the lab's own "
+        "field names. Any detail of a run — conditions, operator, scale, yield, timing, "
+        "analysis, links, a field this lab invented — is answered by quoting `record`, "
+        "never by inferring from the title or the transform. A field that is absent is one "
+        "the logbook does not record. Filters alone are a valid query: a bare `date` lists "
+        "everything run that day, newest first.",
         _schema(
             {
                 "query": STR | {"description": "free text, e.g. 'hindered aniline amide coupling'"},
@@ -1490,12 +1492,11 @@ TOOLS: list[Tool] = [
         "partial, failure or inconclusive. Give the reaction as 'reactants>>product' where "
         "possible so later structural search can find it, and put the real detail in "
         "observations: what was seen, not just that it failed.\n\n"
-        "Put each condition in its own key — catalyst, ligand, reagent, base, solvent, "
-        "temperature, time, equivalents, concentration, atmosphere, workup — rather than "
-        "writing them into a sentence. A condition in its own key can be retrieved later "
-        "by someone asking which catalyst or ligand was used; one buried in prose cannot. "
-        "Common abbreviations (cat, lig, temp, solv) are folded onto the standard spelling. "
-        "`date` defaults to today, so pass it explicitly when logging an older run.",
+        "Put each detail in its own `conditions` key rather than writing it into a "
+        "sentence — a field can be retrieved later when someone asks about this run, "
+        "prose cannot. Use whatever names the lab uses: keys are stored verbatim, never "
+        "renamed, and anything can be recorded. `date` defaults to today, so pass it "
+        "explicitly when logging an older run.",
         _schema(
             {
                 "title": STR,
@@ -1505,8 +1506,8 @@ TOOLS: list[Tool] = [
                 "transform": STR,
                 "conditions": {
                     "type": "object",
-                    "description": "one key per condition: catalyst, ligand, reagent, base, "
-                    "solvent, temperature, time, equivalents, concentration, atmosphere, workup",
+                    "description": "one key per detail, named however the lab names it; "
+                    "stored verbatim",
                 },
                 "yield_percent": NUM,
                 "observations": STR,

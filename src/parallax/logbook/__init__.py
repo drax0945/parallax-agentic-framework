@@ -12,12 +12,10 @@ failures at all.
 """
 
 from .store import (
-    CONDITION_KEYS,
     Experiment,
     LogbookStore,
     add,
     date_tokens,
-    normalise_conditions,
     outcomes_for_transform,
     search,
     stats,
@@ -25,12 +23,10 @@ from .store import (
 )
 
 __all__ = [
-    "CONDITION_KEYS",
     "Experiment",
     "LogbookStore",
     "add",
     "date_tokens",
-    "normalise_conditions",
     "outcomes_for_transform",
     "search",
     "stats",

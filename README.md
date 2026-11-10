@@ -439,18 +439,27 @@ recommendation:
 > Your logbook already has the answer for this exact substrate. HATU/DIPEA/DMF failed;
 > T3P/pyridine/EtOAc at 80 °C gave 71%. **Use T3P.**
 
-### Every record is addressable by date
+### Ask about a particular run
 
-A logbook is also a record of *when*, so "what ligand did we use on the Suzuki on
-12 March?" has to be answerable. Each condition goes in its own field, which is what makes
-it retrievable later — a catalyst written into a sentence cannot be looked up:
+A logbook is a record of *when*, so questions pinned to a date have to be answerable —
+and not only about the chemistry. *What scale was that on? Who ran it? What did the
+analysis say? How long did it take? What was the ELN number?* Record each detail as its
+own field and any of them can be retrieved later; written into a sentence, none of them
+can:
 
 ```bash
 parallax log add "Suzuki onto the ALK core" -o success -y 64 \
-  --date 2026-03-12 --operator RK -t "Suzuki-Miyaura coupling" \
-  --catalyst "Pd(OAc)2" --ligand SPhos --base K3PO4 --temp "100 C" --time "3 h" \
-  -c atmosphere=N2 -n "Full conversion by LCMS in 3 h."
+  --date 2026-03-12 --operator RK --scale "250 mg" -t "Suzuki-Miyaura coupling" \
+  --base K3PO4 --solvent "dioxane/water" --temp "100 C" \
+  -c catalyst="Pd(OAc)2" -c ligand=SPhos -c "stir rate=600 rpm" -c eln=ELN-4471 \
+  -n "Full conversion by LCMS in 3 h."
 ```
+
+`-c key=value` takes **any** field. There is no fixed vocabulary: the store does not know
+what a catalyst is, and it never renames what you wrote. `cat` stays `cat`, `Pd source`
+stays `Pd source`, `stir rate` stays `stir rate` — because an entry is a primary record,
+and silently rewriting a chemist's own field names would make it something else. Whatever
+you record becomes searchable by the words you used, field names included.
 
 Then a date is a complete query — no search text needed:
 
@@ -460,20 +469,17 @@ parallax log search --from 2026-03-01 --to 2026-03-31 # a window
 parallax log search suzuki --date 2026-03-12          # pin an ambiguous query
 ```
 
-```
-  SUCCESS · 64%  Suzuki onto the ALK core
-      2026-03-12 · Suzuki-Miyaura coupling · RK
-      catalyst=Pd(OAc)2, ligand=SPhos, base=K3PO4, temperature=100 C, time=3 h
-```
+Every hit carries `record`: the entry exactly as written, every field, under your names.
+The agent quotes from it and gives the entry id so you can open the file.
 
-The agent reads the value straight out of the entry and quotes it with the entry id — and
-if the field is absent it says the logbook does not record it rather than naming a
-plausible catalyst. Three details make this work in practice:
+**And if the field is not there, it says so.** An absent field is not a value of none, and
+a transform's name is not evidence of how it was run — "the logbook does not record the
+solvent" is a complete answer, and a more useful one than a plausible guess, because it
+tells you what to go and record. This is the same rule as the rest of the system: a number
+without provenance does not get stated.
 
-- **Common abbreviations are folded onto one spelling**, so `cat`, `lig`, `temp` and
-  `solv` land as `catalyst`, `ligand`, `temperature` and `solvent`. Two chemists typing
-  the same thing differently stay searchable as one field. Anything unrecognised is kept
-  verbatim.
+Two smaller decisions:
+
 - **Month names are indexed**, because `2026-03-12` shares no words with "the Suzuki we
   ran in March". The bare year deliberately is not a ranking signal — a shared year should
   never be the reason an entry surfaces, and that is what the date window is for.
@@ -622,7 +628,7 @@ src/parallax/
                    and two interchangeable backends: Claude SDK or any
                    OpenAI-compatible endpoint
 .claude/skills/    11 workflow skills
-tests/            202 tests (`-m network` for the live ones)
+tests/            206 tests (`-m network` for the live ones)
 ```
 
 The 11 skills, which are plain markdown you can read and edit:

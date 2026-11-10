@@ -779,29 +779,29 @@ def log_add(
     project: Optional[str] = typer.Option(None, "--project", "-p"),
     operator: Optional[str] = typer.Option(None, "--operator"),
     date: Optional[str] = typer.Option(None, "--date", help="YYYY-MM-DD"),
-    catalyst: Optional[str] = typer.Option(None, "--catalyst", help="e.g. Pd(OAc)2"),
-    ligand: Optional[str] = typer.Option(None, "--ligand", help="e.g. SPhos"),
     reagent: Optional[str] = typer.Option(None, "--reagent"),
     base: Optional[str] = typer.Option(None, "--base"),
     solvent: Optional[str] = typer.Option(None, "--solvent"),
     temperature: Optional[str] = typer.Option(None, "--temp"),
-    time_taken: Optional[str] = typer.Option(None, "--time", help="e.g. '3 h'"),
     scale: Optional[str] = typer.Option(None, "--scale", help="e.g. '250 mg'"),
     condition: list[str] = typer.Option(
         None, "--condition", "-c",
-        help="anything else, as key=value; repeatable (e.g. -c atmosphere=N2)",
+        help="any detail, as key=value; repeatable. Record whatever matters: "
+             "-c catalyst='Pd(OAc)2' -c 'stir rate=600 rpm' -c eln=ELN-4471",
     ),
 ) -> None:
     """Record an experiment. Failures matter most — nothing else records them."""
     from .agent.tools import call_tool
 
+    # The four named flags are shorthand for the conditions almost every entry
+    # has. Everything else goes through -c, which takes any key this lab uses:
+    # the store does not know a vocabulary and does not rename what you write.
     conditions = {k: v for k, v in
-                  {"catalyst": catalyst, "ligand": ligand, "reagent": reagent,
-                   "base": base, "solvent": solvent, "temperature": temperature,
-                   "time": time_taken}.items() if v}
+                  {"reagent": reagent, "base": base, "solvent": solvent,
+                   "temperature": temperature}.items() if v}
     for pair in condition or []:
         key, _, value = pair.partition("=")
-        if not value:
+        if not value.strip():
             _fail(f"--condition expects key=value, got {pair!r}")
         conditions[key.strip()] = value.strip()
     result = call_tool("logbook_add", {
