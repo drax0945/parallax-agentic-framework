@@ -22,11 +22,22 @@ The synthesis tools screen automatically, but doing it first means you know wher
 stand. A `blocked` verdict is final: report it, keep identity/hazard/regulatory
 information available, and do not look for a way around it.
 
-### 2. Recall
+### 2. Recall, and check the bench record
 
 ```
 memory_recall(query="synthesis <chemotype> <key transform>", types=["sop","failure","heuristic"])
+logbook_search(product_smiles="<target>", transform="<the step you expect to need>")
+logbook_track_record(transform="Amide coupling (acid + amine)")
 ```
+
+The logbook is this lab's own runs. It outranks the literature here, and it is the only
+place failures are recorded — the published record contains almost none. If a search
+returns a failure on the step you were about to propose, that changes the plan: name the
+entry, say what went wrong, and say what you are doing differently this time.
+
+A template's generic reliability prior (0.92 for amide coupling, say) is a starting point;
+`logbook_track_record` tells you what actually happens here. Where the two disagree on
+more than a couple of runs, trust the bench and say so.
 
 Previous sessions may have established that a particular closure failed or that a
 supplier route exists. Failures are the most valuable memories here.

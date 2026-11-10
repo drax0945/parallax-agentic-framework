@@ -25,6 +25,8 @@ app = typer.Typer(
 )
 memory_app = typer.Typer(no_args_is_help=True, help="Inspect and maintain the memory store.")
 app.add_typer(memory_app, name="memory")
+log_app = typer.Typer(no_args_is_help=True, help="The lab logbook: what you ran, and what happened.")
+app.add_typer(log_app, name="log")
 
 
 # --- output helpers ------------------------------------------------------
@@ -761,6 +763,107 @@ def memory_add(
             },
         )
     )
+
+
+# --- logbook -------------------------------------------------------------
+
+
+@log_app.command("add")
+def log_add(
+    title: str = typer.Argument(..., help="What was run."),
+    outcome: str = typer.Option(..., "--outcome", "-o", help="success | partial | failure | inconclusive"),
+    reaction: Optional[str] = typer.Option(None, "--reaction", "-r", help="'reactants>>product'"),
+    transform: Optional[str] = typer.Option(None, "--transform", "-t", help="named reaction"),
+    yield_percent: Optional[float] = typer.Option(None, "--yield", "-y"),
+    notes: str = typer.Option("", "--notes", "-n", help="what you actually saw"),
+    project: Optional[str] = typer.Option(None, "--project", "-p"),
+    operator: Optional[str] = typer.Option(None, "--operator"),
+    date: Optional[str] = typer.Option(None, "--date", help="YYYY-MM-DD"),
+    reagent: Optional[str] = typer.Option(None, "--reagent"),
+    base: Optional[str] = typer.Option(None, "--base"),
+    solvent: Optional[str] = typer.Option(None, "--solvent"),
+    temperature: Optional[str] = typer.Option(None, "--temp"),
+) -> None:
+    """Record an experiment. Failures matter most — nothing else records them."""
+    from .agent.tools import call_tool
+
+    conditions = {k: v for k, v in
+                  {"reagent": reagent, "base": base, "solvent": solvent,
+                   "temperature": temperature}.items() if v}
+    result = call_tool("logbook_add", {
+        "title": title, "outcome": outcome, "reaction_smiles": reaction,
+        "transform": transform, "yield_percent": yield_percent, "observations": notes,
+        "project": project, "operator": operator, "date": date, "conditions": conditions,
+    })
+    if result.get("error"):
+        _fail(result["error"])
+    head("Recorded")
+    kv("id", result["id"])
+    kv("summary", result["summary"])
+    typer.echo(_c(f"  {result['note']}", DIM))
+
+
+@log_app.command("search")
+def log_search(
+    query: list[str] = typer.Argument(None, help="Free text."),
+    product: Optional[str] = typer.Option(None, "--product", help="SMILES — matches structurally"),
+    transform: Optional[str] = typer.Option(None, "--transform", "-t"),
+    outcome: Optional[str] = typer.Option(None, "--outcome", "-o"),
+    k: int = typer.Option(8, "-k"),
+) -> None:
+    """Find what this lab already tried."""
+    from .agent.tools import call_tool
+
+    result = call_tool("logbook_search", {
+        "query": " ".join(query or []) or None, "product_smiles": product,
+        "transform": transform, "outcome": outcome, "k": k,
+    })
+    head(f"{result['n_results']} of {result['store_size']} entries")
+    for hit in result["results"]:
+        colour = GREEN if hit["outcome"] == "success" else (YELLOW if hit["outcome"] == "partial" else RED)
+        y = f" · {hit['yield_percent']:g}%" if hit.get("yield_percent") is not None else ""
+        typer.echo(f"\n  [{hit['relevance']}] {_c(hit['outcome'].upper(), colour)}{y}  {hit['title']}")
+        typer.echo(_c(f"      {hit['date']} · {hit.get('transform') or '—'} · matched on {hit['matched_on']}", DIM))
+        if hit.get("conditions"):
+            typer.echo(_c(f"      {', '.join(f'{k}={v}' for k, v in hit['conditions'].items())}", DIM))
+        if hit.get("observations"):
+            typer.echo(_c(f"      {hit['observations'][:150]}", DIM))
+    if result["n_results"]:
+        typer.echo(_c(f"\n  {result['how_to_read']}", DIM))
+
+
+@log_app.command("record")
+def log_record(transform: str = typer.Argument(..., help="Named reaction.")) -> None:
+    """This lab's real success rate for a transform."""
+    from .agent.tools import call_tool
+
+    result = call_tool("logbook_track_record", {"transform": transform})
+    head(result["transform"])
+    if not result.get("enough_data"):
+        typer.echo(f"  {result['note']}")
+        return
+    kv("runs here", result["n_runs"])
+    kv("success rate", result["in_house_success_rate"])
+    kv("median yield", result["median_yield_percent"])
+    for failure in result["failures"]:
+        typer.echo(_c(f"    failed {failure['date']}: {failure['title']}", YELLOW))
+        typer.echo(_c(f"      {failure['observations'][:140]}", DIM))
+    typer.echo(_c(f"\n  {result['caveat']}", DIM))
+
+
+@log_app.command("list")
+def log_list() -> None:
+    """Show the logbook index."""
+    path = settings().workspace / "logbook" / "LOGBOOK.md"
+    typer.echo(path.read_text(encoding="utf-8") if path.exists() else "  logbook is empty")
+
+
+@log_app.command("stats")
+def log_stats() -> None:
+    """Logbook size and shape."""
+    from .agent.tools import call_tool
+
+    dump(call_tool("logbook_stats", {}))
 
 
 # --- workspace -----------------------------------------------------------

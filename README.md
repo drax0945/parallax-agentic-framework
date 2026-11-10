@@ -110,7 +110,7 @@ Three separate places, and it matters which is which.
 │  console  127.0.0.1:8765     │
 │  MCP server (stdio)          │                   ┌─────────────────────┐
 │                              │   only `ask`/`ui` │ Claude / OpenAI /   │
-│  the 46 tools ───────────────│ ────────────────▶ │ Groq / …            │
+│  the 50 tools ───────────────│ ────────────────▶ │ Groq / …            │
 │  (no model, ever)            │   prompts + tool  │ needs an account    │
 └──────────────────────────────┘   results         └─────────────────────┘
             │
@@ -121,7 +121,7 @@ Three separate places, and it matters which is which.
 **On your machine, always:** every calculation. Structure parsing, descriptors, QSAR
 training and prediction, retrosynthesis, MMPA, multi-parameter scoring, the memory store,
 the citation registry, the console server (bound to `127.0.0.1`, not your network) and the
-MCP server. **None of the 46 tools calls a model.** Verify it yourself:
+MCP server. **None of the 50 tools calls a model.** Verify it yourself:
 
 ```bash
 grep -rl -e anthropic -e claude_agent_sdk src/parallax/chem src/parallax/sources \
@@ -234,7 +234,7 @@ calls the tools, and reports with a bibliography. Runs are saved to `.parallax/r
 
 ### Inside Claude Code or the desktop app
 
-`parallax init` writes `.mcp.json`, so the 46 tools appear in any MCP client:
+`parallax init` writes `.mcp.json`, so the 50 tools appear in any MCP client:
 
 ```json
 { "mcpServers": { "parallax": { "command": "uv", "args": ["run", "parallax", "mcp"] } } }
@@ -396,6 +396,54 @@ remotely. Sources are also exported as JSON and BibTeX.
 
 ---
 
+## The lab logbook
+
+```bash
+parallax log add "HATU coupling onto 2,6-dichloroaniline" -o failure \
+  -r "CC(=O)O.Nc1c(Cl)cccc1Cl>>CC(=O)Nc1c(Cl)cccc1Cl" \
+  -t "Amide coupling (acid + amine)" --reagent HATU --solvent DMF \
+  -n "No conversion by LCMS after 18 h. Aniline too hindered."
+```
+
+Primary records of what this lab actually ran — **successes and failures both**. Kept in
+`logbook/entries/*.md`, separate from memory on purpose: memory holds the agent's
+conclusions and the agent may revise them, while the logbook holds evidence that only a
+human should change.
+
+**In-house results are a fourth evidence tier, `observed`, and they outrank everything
+else here** — published work included. A paper reporting that a step works does not
+overrule a failure on the bench with the substrate in front of you. It is also the only
+source of negative results: the literature publishes almost none.
+
+### Retrieval is structural, not text search
+
+Asking "have we run this before?" is a chemistry question. *"Amide coupling failed"* and
+*"HATU gave no conversion"* share no words but describe the same event, so ranking is
+driven by **product and reactant similarity** first, then the named transform, then text.
+Deterministic, no embedding service, works offline.
+
+```bash
+parallax log search --product "CC(=O)Nc1c(Cl)cccc1Cl"   # finds both runs above
+parallax log record "Amide coupling"                     # this lab's real success rate
+```
+
+`reaction_precedent_search` now queries the logbook before the literature and reports the
+two separately, so a step you have already failed is flagged before it is proposed again.
+Asked how to make that anilide, the agent opens with the logbook rather than a generic
+recommendation:
+
+> Your logbook already has the answer for this exact substrate. HATU/DIPEA/DMF failed;
+> T3P/pyridine/EtOAc at 80 °C gave 71%. **Use T3P.**
+
+### Two things to keep in mind
+
+**One run is not a rate.** Every in-house claim carries its sample size, and
+`logbook_track_record` says so explicitly rather than reporting a bare percentage.
+
+**The logbook is your unpublished IP.** Tool results reach whichever model you use, so a
+hosted provider would see your failed routes. If that matters, run the agent against a
+local Ollama model — then nothing leaves the machine.
+
 ## Continual memory
 
 Memory is a directory of markdown files with an index you can read:
@@ -483,13 +531,14 @@ src/parallax/
   chem/            structure, descriptors, reactions, retro, analogs, optimisation
   sources/         pubchem, chembl, europepmc, crossref, openalex, patents, reaxys, nci
   models/          QSAR with scaffold/time splits, applicability domain, model cards
-  memory/          the continual-learning store
+  memory/          the continual-learning store (the agent's conclusions)
+  logbook/         lab experiment records (primary evidence, human-written)
   ui/              local web console (stdlib HTTP + SSE, no framework)
-  agent/           tools (46), skills loader, prompts, MCP server,
+  agent/           tools (50), skills loader, prompts, MCP server,
                    and two interchangeable backends: Claude SDK or any
                    OpenAI-compatible endpoint
 .claude/skills/    11 workflow skills
-tests/            163 tests (`-m network` for the live ones)
+tests/            184 tests (`-m network` for the live ones)
 ```
 
 The 11 skills, which are plain markdown you can read and edit:

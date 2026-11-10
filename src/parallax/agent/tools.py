@@ -289,11 +289,22 @@ def read_full_text(pmcid: str, max_chars: int = 40000) -> dict[str, Any]:
 
 
 def reaction_precedent_search(
-    query: str, limit: int = 12, include_patents: bool = True, year_from: int | None = None
+    query: str,
+    limit: int = 12,
+    include_patents: bool = True,
+    year_from: int | None = None,
+    product_smiles: str | None = None,
+    transform: str | None = None,
 ) -> dict[str, Any]:
-    """Look for real reported examples of a transformation."""
+    """Look for real reported examples of a transformation, in-house first."""
+    from ..logbook import search as logbook_search_fn
     from ..sources import europepmc, reaxys
 
+    # The lab's own records come first: they are the only source of failures,
+    # and for this lab they outrank anything published.
+    in_house = logbook_search_fn(
+        query, product_smiles=product_smiles, transform=transform, k=6
+    )
     licensed = reaxys.reactions(query=query, limit=limit)
     journals = europepmc.search(query, limit=limit, include_patents=False, year_from=year_from)
     patent_hits = (
@@ -302,8 +313,21 @@ def reaction_precedent_search(
         else {"results": [], "citations": [], "hit_count": 0}
     )
     found = len(journals["results"]) + len(patent_hits["results"]) + len(licensed.get("results", []))
+    house_hits = in_house.get("results", [])
+    house_failures = [h for h in house_hits if h["outcome"] == "failure"]
     return {
         "query": query,
+        "in_house": {
+            "n_results": len(house_hits),
+            "results": house_hits,
+            "failures_here": len(house_failures),
+            "weight": (
+                "These are this lab's own runs and outrank the published precedent below. "
+                "A failure here is evidence the literature does not contain."
+                if house_hits
+                else "Nothing in the logbook matches. That means untried here, not unviable."
+            ),
+        },
         "licensed_database": {
             "available": licensed.get("available", False),
             "results": licensed.get("results", []),
@@ -313,11 +337,19 @@ def reaction_precedent_search(
         "patent_precedents": patent_hits["results"],
         "n_precedents_found": found,
         "verdict": (
-            "precedented — at least one report describes this transformation in a related context"
-            if found
-            else "no precedent found in the free sources searched; this does not prove the step is "
-            "unknown (Reaxys/SciFinder coverage of preparative conditions is deeper), but it "
-            "must be reported as unprecedented-as-far-as-checked"
+            (
+                f"{len(house_failures)} in-house FAILURE(S) on this step — read them before "
+                "proposing it again. "
+                if house_failures
+                else ""
+            )
+            + (
+                "precedented — at least one report describes this transformation in a related context"
+                if found
+                else "no published precedent found in the free sources searched; this does not "
+                "prove the step is unknown (Reaxys/SciFinder coverage of preparative conditions "
+                "is deeper), but it must be reported as unprecedented-as-far-as-checked"
+            )
         ),
         "citations": sorted(
             set(journals["citations"] + patent_hits["citations"] + licensed.get("citations", []))
@@ -911,6 +943,71 @@ def covalent_check(smiles: str) -> dict[str, Any]:
     return covalent_profile(smiles)
 
 
+
+# =====================================================================
+# lab logbook — in-house experimental records
+# =====================================================================
+
+
+def logbook_add(
+    title: str,
+    outcome: str,
+    reaction_smiles: str | None = None,
+    product_smiles: str | None = None,
+    transform: str | None = None,
+    conditions: dict[str, Any] | None = None,
+    yield_percent: float | None = None,
+    observations: str = "",
+    operator: str | None = None,
+    project: str | None = None,
+    date: str | None = None,
+    scale: str | None = None,
+    analysis: str | None = None,
+    tags: list[str] | None = None,
+) -> dict[str, Any]:
+    """Record an experiment this lab ran."""
+    from ..logbook import add
+
+    return add(
+        title=title, outcome=outcome, reaction_smiles=reaction_smiles,
+        product_smiles=product_smiles, transform=transform, conditions=conditions or {},
+        yield_percent=yield_percent, observations=observations, operator=operator,
+        project=project, date=date, scale=scale, analysis=analysis, tags=tags or [],
+    )
+
+
+def logbook_search(
+    query: str | None = None,
+    product_smiles: str | None = None,
+    reaction_smiles: str | None = None,
+    transform: str | None = None,
+    outcome: str | None = None,
+    project: str | None = None,
+    k: int = 8,
+) -> dict[str, Any]:
+    """Find what this lab has already tried."""
+    from ..logbook import search
+
+    return search(
+        query, product_smiles=product_smiles, reaction_smiles=reaction_smiles,
+        transform=transform, outcome=outcome, project=project, k=k,
+    )
+
+
+def logbook_track_record(transform: str) -> dict[str, Any]:
+    """How this lab actually fares at a given transform."""
+    from ..logbook import outcomes_for_transform
+
+    return outcomes_for_transform(transform)
+
+
+def logbook_stats() -> dict[str, Any]:
+    """Size and shape of the logbook."""
+    from ..logbook import stats
+
+    return stats()
+
+
 # =====================================================================
 # registry
 # =====================================================================
@@ -1072,11 +1169,19 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         "reaction_precedent_search",
-        "Look for real reported examples of a transformation, across a licensed reaction "
-        "database (if configured), journals and patents. Call this on every synthetic step you "
-        "propose: it is what turns a template guess into a precedented step, and it tells you "
-        "plainly when no precedent was found.",
-        _schema({"query": STR, "limit": INT, "include_patents": BOOL, "year_from": INT}, ["query"]),
+        "Look for real reported examples of a transformation — THIS LAB'S OWN RECORDS FIRST, "
+        "then a licensed reaction database (if configured), journals and patents. Call this on "
+        "every synthetic step you propose: it is what turns a template guess into a precedented "
+        "step. Pass product_smiles and transform so the in-house search can match structurally. "
+        "An in-house failure outranks a published success, and it is evidence no database holds.",
+        _schema(
+            {
+                "query": STR, "limit": INT, "include_patents": BOOL, "year_from": INT,
+                "product_smiles": STR | {"description": "lets the logbook match structurally"},
+                "transform": STR | {"description": "named reaction, for the logbook track record"},
+            },
+            ["query"],
+        ),
         reaction_precedent_search,
         group="synthesis",
     ),
@@ -1332,6 +1437,76 @@ TOOLS: list[Tool] = [
         _schema({"smiles": STR}, ["smiles"]),
         covalent_check,
         group="properties",
+    ),
+    Tool(
+        "logbook_search",
+        "Search this lab's own experiment records — what was actually run here and what "
+        "happened, successes and failures alike. Ranked by structural similarity to the "
+        "product first, then the named transform, then text, so it finds prior runs even "
+        "when the wording differs. **Call this before proposing any synthetic step or "
+        "design.** In-house results outrank published precedent for this lab, and failures "
+        "recorded here exist nowhere in the literature.",
+        _schema(
+            {
+                "query": STR | {"description": "free text, e.g. 'hindered aniline amide coupling'"},
+                "product_smiles": STR | {"description": "find runs that made this, or something like it"},
+                "reaction_smiles": STR | {"description": "'reactants>>product'; split automatically"},
+                "transform": STR | {"description": "named reaction, e.g. 'Amide coupling'"},
+                "outcome": STR | {"enum": ["success", "partial", "failure", "inconclusive"]},
+                "project": STR,
+                "k": INT,
+            },
+        ),
+        logbook_search,
+        group="logbook",
+    ),
+    Tool(
+        "logbook_track_record",
+        "This lab's measured success rate for a transform, with the failures spelled out. "
+        "Use it to sanity-check a reaction template's generic reliability prior against "
+        "what actually happens here — and read the failures rather than the rate, because "
+        "a handful of runs is a hint, not a statistic.",
+        _schema({"transform": STR}, ["transform"]),
+        logbook_track_record,
+        group="logbook",
+    ),
+    Tool(
+        "logbook_add",
+        "Record an experiment in the lab logbook. Use it when the user reports a result — "
+        "a reaction that worked, and especially one that did not. Outcome is success, "
+        "partial, failure or inconclusive. Give the reaction as 'reactants>>product' where "
+        "possible so later structural search can find it, and put the real detail in "
+        "observations: what was seen, not just that it failed.",
+        _schema(
+            {
+                "title": STR,
+                "outcome": STR | {"enum": ["success", "partial", "failure", "inconclusive"]},
+                "reaction_smiles": STR,
+                "product_smiles": STR,
+                "transform": STR,
+                "conditions": {"type": "object", "description": "reagent, base, solvent, temperature, time"},
+                "yield_percent": NUM,
+                "observations": STR,
+                "operator": STR,
+                "project": STR,
+                "date": STR | {"description": "YYYY-MM-DD; defaults to today"},
+                "scale": STR,
+                "analysis": STR | {"description": "LCMS/NMR pointer"},
+                "tags": _str_list("lowercase tags"),
+            },
+            ["title", "outcome"],
+        ),
+        logbook_add,
+        group="logbook",
+        read_only=False,
+    ),
+    Tool(
+        "logbook_stats",
+        "Size and shape of the lab logbook: entry count, outcome split, transforms covered, "
+        "projects, how many carry structures.",
+        _schema({}),
+        logbook_stats,
+        group="logbook",
     ),
     Tool(
         "memory_recall",
