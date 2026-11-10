@@ -858,6 +858,27 @@ def log_list() -> None:
     typer.echo(path.read_text(encoding="utf-8") if path.exists() else "  logbook is empty")
 
 
+@log_app.command("reindex")
+def log_reindex(
+    rebuild: bool = typer.Option(False, "--rebuild", help="Discard the index and build it fresh."),
+) -> None:
+    """Refresh the search index. Runs automatically; use this to force it."""
+    import shutil
+
+    from .logbook.store import Experiment, LogbookStore
+
+    store = LogbookStore()
+    if rebuild and (store.root / ".index").exists():
+        shutil.rmtree(store.root / ".index")
+        typer.echo(_c("  discarded the existing index", DIM))
+    index = store.index()
+    changes = index.refresh(parse=Experiment.from_markdown)
+    head("Index")
+    for key, value in {**index.stats(), **changes}.items():
+        kv(key, value)
+    typer.echo(_c("\n  The index is a cache; the markdown in entries/ is the source of truth.", DIM))
+
+
 @log_app.command("stats")
 def log_stats() -> None:
     """Logbook size and shape."""

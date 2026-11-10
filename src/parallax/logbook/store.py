@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+import numpy as np
 from rdkit import Chem, DataStructs, RDLogger
 from rdkit.Chem import rdFingerprintGenerator
 
@@ -233,6 +234,26 @@ class LogbookStore:
         self.entries_dir.mkdir(parents=True, exist_ok=True)
         self._cache: dict[str, Experiment] | None = None
         self._fps: dict[str, Any] = {}
+        self._index: Any = None
+
+    # --- index ------------------------------------------------------------
+    def index(self):
+        """The search index, refreshed against what is actually on disk."""
+        from .index import LogbookIndex
+
+        if self._index is None:
+            self._index = LogbookIndex(self.root, self.entries_dir)
+        self._index.refresh(parse=Experiment.from_markdown)
+        return self._index
+
+    def load_entry(self, entry_id: str) -> Experiment | None:
+        """Read one entry's full text. Search never needs this for the whole store."""
+        if self._cache and entry_id in self._cache:
+            return self._cache[entry_id]
+        path = self.entries_dir / f"{entry_id}.md"
+        if not path.exists():
+            return None
+        return Experiment.from_markdown(path.read_text(encoding="utf-8"))
 
     # --- io -------------------------------------------------------------
     def _load(self) -> dict[str, Experiment]:
@@ -254,6 +275,7 @@ class LogbookStore:
         if self._cache is not None:
             self._cache[entry.id] = entry
         self._fps.pop(entry.id, None)
+        self._index = None
         self._write_index()
 
     def _write_index(self) -> None:
@@ -383,9 +405,14 @@ class LogbookStore:
         k: int = 8,
         min_score: float = 0.05,
     ) -> dict[str, Any]:
-        """Hybrid search: structure first, then transform name, then text."""
-        entries = self.all_entries()
-        if not entries:
+        """Hybrid search: structure first, then transform name, then text.
+
+        Runs against the persistent index, so nothing re-reads the markdown and
+        nothing re-computes a fingerprint. Only the entries actually returned
+        have their bodies loaded.
+        """
+        index = self.index()
+        if not len(index):
             return {"n_results": 0, "results": [], "store_size": 0,
                     "note": "The logbook is empty. Add experiments with logbook_add."}
 
@@ -394,40 +421,52 @@ class LogbookStore:
             product_smiles = product_smiles or parsed_product
             reactant_smiles = reactant_smiles or parsed_reactants
 
-        query_product_fp = _fingerprint(product_smiles)
-        query_reactant_fps = [fp for fp in (_fingerprint(r) for r in (reactant_smiles or [])) if fp]
-        query_tokens = _tokens(query or "")
+        structural = index.structural_scores(product_smiles)
+        text_scores = index.token_overlap(_tokens(query or ""))
         transform_key = (transform or "").strip().lower()
 
-        scored: list[tuple[float, dict[str, Any], Experiment]] = []
-        for entry in entries:
-            if outcome and entry.outcome != outcome:
+        # Only consider rows that something actually matched, so a big logbook
+        # costs no more than a small one for a narrow query.
+        candidates: set[int] = set(text_scores)
+        if structural is not None:
+            candidates |= set(np.flatnonzero(structural > 0.3).tolist())
+        if transform_key:
+            candidates |= {
+                position for position, row in enumerate(index.rows)
+                if row.get("transform") and transform_key in row["transform"].lower()
+            }
+        if not candidates:
+            candidates = set(range(len(index))) if not (query or product_smiles or transform_key) else set()
+
+        reactant_scores = None
+        if reactant_smiles and len(candidates) <= 4000:
+            reactant_scores = index.reactant_scores(list(reactant_smiles))
+
+        scored: list[tuple[float, dict[str, Any], int]] = []
+        for position in candidates:
+            row = index.rows[position]
+            if outcome and row["outcome"] != outcome:
                 continue
-            if project and (entry.project or "").lower() != project.lower():
+            if project and (row.get("project") or "").lower() != project.lower():
                 continue
 
-            fps = self._entry_fp(entry)
             why: dict[str, Any] = {}
             score = 0.0
 
-            if query_product_fp is not None and fps["product"] is not None:
-                similarity = DataStructs.TanimotoSimilarity(query_product_fp, fps["product"])
+            if structural is not None:
+                similarity = float(structural[position])
                 if similarity > 0.3:
                     score += 0.55 * similarity
                     why["product_similarity"] = round(similarity, 3)
 
-            if query_reactant_fps and fps["reactants"]:
-                best = max(
-                    DataStructs.TanimotoSimilarity(a, b)
-                    for a in query_reactant_fps
-                    for b in fps["reactants"]
-                )
+            if reactant_scores is not None:
+                best = float(reactant_scores[position])
                 if best > 0.3:
                     score += 0.2 * best
                     why["reactant_similarity"] = round(best, 3)
 
-            if transform_key and entry.transform:
-                entry_transform = entry.transform.lower()
+            if transform_key and row.get("transform"):
+                entry_transform = row["transform"].lower()
                 if transform_key == entry_transform:
                     score += 0.3
                     why["transform"] = "exact match"
@@ -435,41 +474,45 @@ class LogbookStore:
                     score += 0.18
                     why["transform"] = "related"
 
-            if query_tokens:
-                entry_tokens = _tokens(entry.searchable())
-                overlap = len(query_tokens & entry_tokens) / max(len(query_tokens), 1)
-                if overlap:
-                    score += 0.3 * overlap
-                    why["text_overlap"] = round(overlap, 3)
+            overlap = text_scores.get(position, 0.0)
+            if overlap:
+                score += 0.3 * overlap
+                why["text_overlap"] = round(overlap, 3)
 
             if score >= min_score:
-                scored.append((score, why, entry))
+                scored.append((score, why, position))
 
         scored.sort(key=lambda row: row[0], reverse=True)
         top = scored[:k]
 
-        return {
-            "n_results": len(top),
-            "store_size": len(entries),
-            "results": [
+        results = []
+        for score, why, position in top:
+            summary = index.entry_at(position)
+            entry = self.load_entry(summary.id)  # body loaded only for a hit
+            results.append(
                 {
-                    "id": entry.id,
-                    "date": entry.date,
-                    "title": entry.title,
-                    "outcome": entry.outcome,
-                    "yield_percent": entry.yield_percent,
-                    "transform": entry.transform,
-                    "reaction_smiles": entry.reaction_smiles,
-                    "product_smiles": entry.product_smiles,
-                    "conditions": entry.conditions,
-                    "observations": entry.observations[:600],
-                    "operator": entry.operator,
-                    "project": entry.project,
+                    "id": summary.id,
+                    "date": summary.date,
+                    "title": summary.title,
+                    "outcome": summary.outcome,
+                    "yield_percent": summary.yield_percent,
+                    "transform": summary.transform,
+                    "reaction_smiles": entry.reaction_smiles if entry else None,
+                    "product_smiles": summary.product_smiles,
+                    "conditions": entry.conditions if entry else {},
+                    "observations": (entry.observations[:600] if entry else ""),
+                    "operator": entry.operator if entry else None,
+                    "project": summary.project,
                     "relevance": round(score, 3),
                     "matched_on": why,
                 }
-                for score, why, entry in top
-            ],
+            )
+
+        return {
+            "n_results": len(results),
+            "store_size": len(index),
+            "candidates_considered": len(candidates),
+            "results": results,
             "how_to_read": (
                 "In-house records, ranked by structural similarity first, then the named "
                 "transform, then text. These are observations from this lab: they outrank "
@@ -482,9 +525,10 @@ class LogbookStore:
     def outcomes_for_transform(self, transform: str, *, min_runs: int = 1) -> dict[str, Any]:
         """How this lab actually fares at a given transform."""
         key = (transform or "").strip().lower()
+        index = self.index()
         matching = [
-            e for e in self.all_entries()
-            if e.transform and (key == e.transform.lower() or key in e.transform.lower())
+            index.entry_at(position) for position, row in enumerate(index.rows)
+            if row.get("transform") and (key == row["transform"].lower() or key in row["transform"].lower())
         ]
         if len(matching) < min_runs:
             return {
@@ -510,7 +554,8 @@ class LogbookStore:
             ),
             "failures": [
                 {"id": e.id, "date": e.date, "title": e.title,
-                 "observations": e.observations[:240]}
+                 "observations": ((self.load_entry(e.id) or e).observations[:240]
+                                  if hasattr(self.load_entry(e.id) or e, "observations") else "")}
                 for e in matching if e.outcome == "failure"
             ][:6],
             "caveat": (
@@ -520,7 +565,8 @@ class LogbookStore:
         }
 
     def stats(self) -> dict[str, Any]:
-        entries = self.all_entries()
+        index = self.index()
+        entries = [index.entry_at(i) for i in range(len(index))]
         counts: dict[str, int] = {}
         transforms: dict[str, int] = {}
         projects: dict[str, int] = {}
@@ -537,6 +583,7 @@ class LogbookStore:
             "by_transform": dict(sorted(transforms.items(), key=lambda kv: -kv[1])[:12]),
             "by_project": projects,
             "with_structures": sum(1 for e in entries if e.product_smiles),
+            "index": index.stats(),
             "median_yield_percent": round(sorted(yields)[len(yields) // 2], 1) if yields else None,
             "date_range": [min((e.date for e in entries), default=None),
                            max((e.date for e in entries), default=None)],

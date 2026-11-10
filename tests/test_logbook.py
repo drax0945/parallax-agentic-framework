@@ -147,3 +147,78 @@ class TestPrecedenceInTheAgentSurface:
         assert "**observed**" in SYSTEM_PROMPT
         assert SYSTEM_PROMPT.index("**observed**") < SYSTEM_PROMPT.index("**measured**")
         assert "outranks everything below" in SYSTEM_PROMPT
+
+
+class TestIndexScaling:
+    """The markdown stays authoritative; the index only makes it fast."""
+
+    def test_search_runs_through_the_index(self, book):
+        index = book.index()
+        assert len(index) == 3
+        assert index.stats()["indexed_entries"] == 3
+        assert (book.root / ".index" / "fingerprints.npy").exists()
+
+    def test_a_hand_edited_file_is_picked_up(self, book):
+        target = next(book.entries_dir.glob("*hatu*.md"))
+        target.write_text(
+            target.read_text(encoding="utf-8").replace(
+                "Aniline too hindered.", "Aniline too hindered. Retried with T3P."
+            ),
+            encoding="utf-8",
+        )
+        hits = LogbookStore(root=book.root).search("retried T3P")["results"]
+        assert hits and "Retried with T3P" in hits[0]["observations"]
+
+    def test_a_deleted_file_leaves_the_index(self, book):
+        next(book.entries_dir.glob("*suzuki*.md")).unlink()
+        assert LogbookStore(root=book.root).search("bromopyridine")["store_size"] == 2
+
+    def test_deleting_the_index_loses_nothing(self, book):
+        import shutil
+
+        book.index()  # make sure there is one to delete
+        shutil.rmtree(book.root / ".index")
+        rebuilt = LogbookStore(root=book.root)
+        assert rebuilt.search(product_smiles=PRODUCT)["n_results"] == 2
+
+    def test_a_corrupt_index_is_rebuilt_rather_than_raising(self, book):
+        book.index()
+        (book.root / ".index" / "meta.json").write_text("{ not json", encoding="utf-8")
+        assert LogbookStore(root=book.root).search(product_smiles=PRODUCT)["n_results"] == 2
+
+    def test_unchanged_files_are_not_reparsed(self, book):
+        from parallax.logbook.store import Experiment
+
+        book.index()  # first pass parses everything
+        changes = LogbookStore(root=book.root).index().refresh(parse=Experiment.from_markdown)
+        assert changes["reparsed"] == 0 and changes["added"] == 0
+        assert changes["unchanged"] == 3
+
+    def test_a_narrow_query_does_not_score_the_whole_store(self, book):
+        result = book.search("hindered aniline")
+        assert result["candidates_considered"] < result["store_size"]
+
+    def test_bulk_tanimoto_matches_rdkit(self):
+        import numpy as np
+        from rdkit import Chem, DataStructs
+        from rdkit.Chem import rdFingerprintGenerator
+
+        from parallax.logbook.index import bulk_tanimoto, pack_fingerprint
+
+        gen = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
+        smiles = ["CC(=O)Nc1ccccc1", "CC(=O)Nc1c(Cl)cccc1Cl", "CCO"]
+        packed = [pack_fingerprint(s) for s in smiles]
+        matrix = np.vstack([np.frombuffer(p, dtype=np.uint8) for p in packed])
+        from parallax.logbook.index import _POPCOUNT
+
+        popcounts = _POPCOUNT[matrix].sum(axis=1).astype(np.float32)
+        ours = bulk_tanimoto(matrix, popcounts, packed[0])
+
+        reference = [
+            DataStructs.TanimotoSimilarity(
+                gen.GetFingerprint(Chem.MolFromSmiles(smiles[0])),
+                gen.GetFingerprint(Chem.MolFromSmiles(s)),
+            )
+            for s in smiles
+        ]
+        assert np.allclose(ours, reference, atol=1e-6)

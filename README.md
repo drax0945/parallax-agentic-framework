@@ -435,6 +435,33 @@ recommendation:
 > Your logbook already has the answer for this exact substrate. HATU/DIPEA/DMF failed;
 > T3P/pyridine/EtOAc at 80 °C gave 71%. **Use T3P.**
 
+### It stays fast as it grows
+
+The markdown is authoritative, but re-reading every file per query does not scale. A
+persistent index under `logbook/.index/` fixes that without changing where the data lives.
+Measured on **25,000 drug-sized entries**:
+
+| | before | after |
+|---|---|---|
+| cold load | 4.28 s | **0.27 s** |
+| structural search | 2.31 s | **0.23 s** |
+| text search | 0.75 s | **0.14 s** |
+| **one cold query** | **6.59 s** | **0.50 s** |
+
+Three things do the work. Fingerprints are packed once into a `uint8` matrix and compared
+with a vectorised popcount Tanimoto — 25,000 comparisons in ~8 ms rather than 2.3 s.
+Tokens live in an inverted index, so a text query touches only entries sharing a word.
+And entry bodies are never loaded to search, only for the handful of results returned.
+
+Refresh is incremental: files are compared by size and mtime, so editing one entry by hand
+re-parses one file. The index is a cache and never the source of truth — delete it, or run
+`parallax log reindex --rebuild`, and it rebuilds from the markdown. A corrupt index is
+discarded rather than raising.
+
+**Memory needs none of this.** It holds the agent's conclusions, which accumulate slowly
+and are merged by `memory_consolidate`; at 8,000 entries a cold recall is 0.55 s, so it
+stays a plain linear scan. Different growth curve, different answer.
+
 ### Two things to keep in mind
 
 **One run is not a rate.** Every in-house claim carries its sample size, and
@@ -533,12 +560,13 @@ src/parallax/
   models/          QSAR with scaffold/time splits, applicability domain, model cards
   memory/          the continual-learning store (the agent's conclusions)
   logbook/         lab experiment records (primary evidence, human-written)
+                   + .index/, a rebuildable cache that keeps search fast at scale
   ui/              local web console (stdlib HTTP + SSE, no framework)
   agent/           tools (50), skills loader, prompts, MCP server,
                    and two interchangeable backends: Claude SDK or any
                    OpenAI-compatible endpoint
 .claude/skills/    11 workflow skills
-tests/            172 tests (`-m network` for the live ones)
+tests/            181 tests (`-m network` for the live ones)
 ```
 
 The 11 skills, which are plain markdown you can read and edit:

@@ -16,3 +16,6 @@ __pycache__/
 .idea/
 .vscode/
 .DS_Store
+
+# Logbook search index — a cache, rebuilt from entries/ on demand
+logbook/.index/
