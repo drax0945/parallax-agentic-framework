@@ -881,7 +881,7 @@ def log_record(transform: str = typer.Argument(..., help="Named reaction.")) -> 
 @log_app.command("list")
 def log_list() -> None:
     """Show the logbook index."""
-    path = settings().workspace / "logbook" / "LOGBOOK.md"
+    path = settings().logbook_dir / "LOGBOOK.md"
     typer.echo(path.read_text(encoding="utf-8") if path.exists() else "  logbook is empty")
 
 
@@ -937,7 +937,10 @@ def doctor() -> None:
     cfg = settings()
     head("Workspace")
     kv("root", cfg.workspace)
-    kv("memory", f"{cfg.memory_dir} ({'exists' if cfg.memory_dir.exists() else 'not created yet'})")
+    for label, path in (("memory", cfg.memory_dir), ("logbook", cfg.logbook_dir)):
+        state = "exists" if path.exists() else "not created yet"
+        count = len(list((path / "entries").glob("*.md"))) if path.exists() else 0
+        kv(label, f"{path} ({state}, {count} entries)")
     kv("skills", f"{cfg.skills_dir} ({len(list(cfg.skills_dir.glob('*/SKILL.md'))) if cfg.skills_dir.exists() else 0} skills)")
     kv("models", len(list(cfg.models_dir.glob('*.pkl'))) if cfg.models_dir.exists() else 0)
     kv("cache", f"{sum(1 for _ in cfg.cache_dir.rglob('*.json'))} entries" if cfg.cache_dir.exists() else "empty")
@@ -1112,8 +1115,13 @@ def init(
         created.append(str(env_example))
 
     head("Workspace ready")
-    for path in (cfg.memory_dir, cfg.memory_entries_dir, cfg.reports_dir, cfg.state_dir):
-        kv(path.name, str(path))
+    for path in (cfg.memory_dir, cfg.memory_entries_dir, cfg.logbook_dir,
+                 cfg.logbook_entries_dir, cfg.reports_dir, cfg.state_dir):
+        try:
+            label = str(path.relative_to(cfg.workspace))
+        except ValueError:
+            label = path.name
+        kv(label, str(path))
     for path in created:
         typer.echo(f"  created {path}")
     typer.echo(f"\n  {len(list(cfg.skills_dir.glob('*/SKILL.md')))} skills in {cfg.skills_dir}")

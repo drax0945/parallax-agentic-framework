@@ -17,11 +17,17 @@ __pycache__/
 # from them. Both are specific to whoever is running Parallax, and neither is
 # something a clone should inherit: a shipped logbook entry would be read as
 # in-house precedent by somebody else's agent, which is exactly wrong.
-# Both directories are created on first use, so a fresh clone starts empty.
+#
+# `reports/` is the same: generated output from whatever was run here.
+#
+# `parallax init` creates all three, and the stores create their own on first
+# use, so a fresh clone starts with an empty workspace rather than a broken one.
+# To commit one report deliberately: git add -f reports/<name>.html
 #
 # This also keeps test and demo runs out of the repository.
 logbook/
 memory/
+reports/
 
 # IDE
 .idea/

@@ -299,7 +299,7 @@ def _parse_frontmatter(text: str) -> dict[str, Any]:
 
 class LogbookStore:
     def __init__(self, root: Path | None = None) -> None:
-        self.root = root or (settings().workspace / "logbook")
+        self.root = root or settings().logbook_dir
         self.entries_dir = self.root / "entries"
         self.index_path = self.root / "LOGBOOK.md"
         self.entries_dir.mkdir(parents=True, exist_ok=True)

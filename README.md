@@ -68,8 +68,12 @@ No `uv`? `python3 -m venv .venv && .venv/bin/pip install -e .` works the same.
 .venv/bin/parallax init
 ```
 
-Writes `memory/`, `reports/`, `.parallax/` (cache, models, run transcripts), plus
-`.mcp.json` and `.env.example`. Safe to re-run; it will not overwrite what exists.
+Writes `memory/`, `logbook/`, `reports/`, `.parallax/` (cache, models, run transcripts),
+plus `.mcp.json` and `.env.example`. Safe to re-run; it will not overwrite what exists.
+
+All four hold *your* data and all four are gitignored, so a clone starts empty and nothing
+from one workspace reaches another. To commit a particular report anyway, force it:
+`git add -f reports/your-report.html`.
 
 ### 3. Check it
 

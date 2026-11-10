@@ -99,6 +99,14 @@ class Settings:
         return candidates[0]
 
     @property
+    def logbook_dir(self) -> Path:
+        return self.workspace / "logbook"
+
+    @property
+    def logbook_entries_dir(self) -> Path:
+        return self.logbook_dir / "entries"
+
+    @property
     def reports_dir(self) -> Path:
         return self.workspace / "reports"
 
@@ -110,6 +118,8 @@ class Settings:
             self.models_dir,
             self.memory_dir,
             self.memory_entries_dir,
+            self.logbook_dir,
+            self.logbook_entries_dir,
             self.reports_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
