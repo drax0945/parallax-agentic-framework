@@ -222,3 +222,178 @@ class TestIndexScaling:
             for s in smiles
         ]
         assert np.allclose(ours, reference, atol=1e-6)
+
+
+@pytest.fixture()
+def dated_book(tmp_path):
+    """Three runs on three days, with conditions recorded field by field."""
+    store = LogbookStore(root=tmp_path / "dated")
+    store.add(
+        title="Suzuki on the chloropyridine core", outcome="success", yield_percent=64,
+        date="2026-03-12", operator="RK",
+        reaction_smiles="Clc1ccncc1.OB(O)c1ccccc1>>c1ccc(-c2ccncc2)cc1",
+        transform="Suzuki-Miyaura coupling",
+        conditions={"catalyst": "Pd(OAc)2", "ligand": "SPhos", "base": "K3PO4",
+                    "solvent": "dioxane/water", "temperature": "100 C"},
+        observations="Full conversion in 3 h.", project="ALK series",
+    )
+    store.add(
+        title="Suzuki retry with a bulkier ligand", outcome="failure",
+        date="2026-03-14", operator="RK",
+        reaction_smiles="Clc1ccncc1.OB(O)c1ccccc1>>c1ccc(-c2ccncc2)cc1",
+        transform="Suzuki-Miyaura coupling",
+        conditions={"cat": "Pd2(dba)3", "lig": "XPhos", "solv": "toluene", "temp": "110 C"},
+        observations="Protodeboronation dominated.", project="ALK series",
+    )
+    store.add(
+        title="Buchwald amination of the same core", outcome="success", yield_percent=52,
+        date="2026-04-02", operator="JD", transform="Buchwald-Hartwig amination",
+        conditions={"catalyst": "Pd(OAc)2", "ligand": "BrettPhos", "base": "NaOtBu"},
+        project="ALK series",
+    )
+    return store
+
+
+class TestDateAddressableRecords:
+    """A run is identified by when it happened, not only by what it made."""
+
+    def test_a_date_pins_one_day(self, dated_book):
+        hits = dated_book.search(date="2026-03-12")["results"]
+        assert len(hits) == 1
+        assert hits[0]["title"] == "Suzuki on the chloropyridine core"
+
+    def test_a_bare_date_needs_no_search_text(self, dated_book):
+        """'What did we run on the 14th' is a complete question."""
+        result = dated_book.search(date="2026-03-14")
+        assert result["n_results"] == 1
+        assert result["ordering"] == "date, newest first"
+        assert result["filters"] == {"date": "2026-03-14"}
+
+    def test_a_window_bounds_both_ends(self, dated_book):
+        march = dated_book.search(date_from="2026-03-01", date_to="2026-03-31")["results"]
+        assert len(march) == 2
+        assert [h["date"] for h in march] == ["2026-03-14", "2026-03-12"]  # newest first
+
+    def test_an_open_ended_window_works(self, dated_book):
+        assert dated_book.search(date_from="2026-04-01")["n_results"] == 1
+        assert dated_book.search(date_to="2026-03-12")["n_results"] == 1
+
+    def test_the_catalyst_question_is_answerable_from_the_hit(self, dated_book):
+        """The question this exists for: which catalyst, on which date."""
+        hits = dated_book.search("Suzuki", date="2026-03-12")["results"]
+        assert len(hits) == 1
+        conditions = hits[0]["conditions"]
+        assert conditions["catalyst"] == "Pd(OAc)2"
+        assert conditions["ligand"] == "SPhos"
+        assert hits[0]["operator"] == "RK"
+
+    def test_a_date_narrows_an_otherwise_ambiguous_query(self, dated_book):
+        """Two Suzukis on the same substrate; the date separates them."""
+        both = dated_book.search(transform="Suzuki-Miyaura coupling")["results"]
+        assert len(both) == 2
+        one = dated_book.search(transform="Suzuki-Miyaura coupling", date="2026-03-14")["results"]
+        assert len(one) == 1 and one[0]["conditions"]["ligand"] == "XPhos"
+
+    def test_a_date_filter_combines_with_outcome(self, dated_book):
+        result = dated_book.search(date_from="2026-03-01", date_to="2026-03-31", outcome="failure")
+        assert result["n_results"] == 1
+        assert result["results"][0]["date"] == "2026-03-14"
+
+    def test_a_month_name_reaches_the_entry(self, dated_book):
+        """Nobody types an ISO date half the time."""
+        hits = dated_book.search("suzuki run in march")["results"]
+        assert len(hits) == 2
+        assert all(h["date"].startswith("2026-03") for h in hits)
+
+    def test_the_year_alone_does_not_surface_an_entry(self, dated_book):
+        """A shared year is too weak to be a reason for a hit; the filter is."""
+        top = dated_book.search("suzuki 2026")["results"][:2]
+        assert all(h["date"].startswith("2026-03") for h in top)
+
+    def test_an_unused_date_returns_nothing_rather_than_the_nearest(self, dated_book):
+        assert dated_book.search(date="2026-03-13")["n_results"] == 0
+
+
+class TestConditionKeys:
+    def test_abbreviations_are_folded_onto_one_spelling(self, dated_book):
+        hits = dated_book.search(date="2026-03-14")["results"]
+        conditions = hits[0]["conditions"]
+        assert conditions["catalyst"] == "Pd2(dba)3"   # recorded as 'cat'
+        assert conditions["ligand"] == "XPhos"         # recorded as 'lig'
+        assert conditions["solvent"] == "toluene"      # recorded as 'solv'
+        assert conditions["temperature"] == "110 C"    # recorded as 'temp'
+        assert "cat" not in conditions and "lig" not in conditions
+
+    def test_an_unknown_key_is_kept_verbatim(self, tmp_path):
+        store = LogbookStore(root=tmp_path / "lb")
+        store.add(title="x", outcome="success", conditions={"microwave power": "150 W"})
+        assert store.all_entries()[0].conditions["microwave_power"] == "150 W"
+
+    def test_hand_written_keys_are_normalised_on_read(self, dated_book):
+        """A chemist editing the markdown by hand still gets found."""
+        target = next(dated_book.entries_dir.glob("*buchwald*.md"))
+        target.write_text(
+            target.read_text(encoding="utf-8").replace("  catalyst: Pd(OAc)2", "  Cat: Pd(OAc)2"),
+            encoding="utf-8",
+        )
+        hits = LogbookStore(root=dated_book.root).search(date="2026-04-02")["results"]
+        assert hits[0]["conditions"]["catalyst"] == "Pd(OAc)2"
+
+    def test_the_condition_keys_are_named_for_the_agent(self):
+        from parallax.logbook import CONDITION_KEYS
+
+        assert "catalyst" in CONDITION_KEYS and "ligand" in CONDITION_KEYS
+
+    def test_the_prompt_forbids_inventing_a_catalyst(self):
+        from parallax.agent.prompts import SYSTEM_PROMPT
+
+        assert "do not supply a plausible catalyst" in SYSTEM_PROMPT
+
+
+class TestDateTokens:
+    def test_the_iso_form_month_and_year_month_are_indexed(self):
+        from parallax.logbook import date_tokens
+
+        assert date_tokens("2026-03-12") == ["2026-03-12", "2026-03", "march"]
+
+    def test_the_year_comes_free_from_the_tokeniser(self):
+        from parallax.memory.store import _tokens
+
+        assert "2026" in _tokens("2026-03-12")
+
+    def test_a_missing_or_odd_date_does_not_raise(self):
+        from parallax.logbook import date_tokens
+
+        assert date_tokens(None) == [] and date_tokens("") == []
+        assert date_tokens("unknown") == ["unknown"]
+
+
+class TestFilterOnlyQueries:
+    def test_an_outcome_alone_lists_the_failures(self, dated_book):
+        """Previously scored to zero and returned nothing."""
+        result = dated_book.search(outcome="failure")
+        assert result["n_results"] == 1
+        assert result["ordering"] == "date, newest first"
+
+    def test_a_project_alone_lists_the_project(self, dated_book):
+        assert dated_book.search(project="ALK series")["n_results"] == 3
+
+    def test_a_ranked_query_still_ranks(self, dated_book):
+        result = dated_book.search("protodeboronation")
+        assert result["ordering"] == "relevance"
+        assert result["results"][0]["outcome"] == "failure"
+
+
+class TestIndexVersioning:
+    def test_an_index_from_an_older_version_is_rebuilt(self, dated_book):
+        import json
+
+        dated_book.index()
+        meta_path = dated_book.root / ".index" / "meta.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta["version"] = 1  # as written before searchable() changed
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+        reopened = LogbookStore(root=dated_book.root)
+        assert reopened.search("suzuki run in march")["n_results"] == 2
+        assert json.loads(meta_path.read_text(encoding="utf-8"))["version"] >= 2

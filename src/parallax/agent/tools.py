@@ -983,14 +983,18 @@ def logbook_search(
     transform: str | None = None,
     outcome: str | None = None,
     project: str | None = None,
+    date: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
     k: int = 8,
 ) -> dict[str, Any]:
-    """Find what this lab has already tried."""
+    """Find what this lab has already tried, optionally pinned to a date."""
     from ..logbook import search
 
     return search(
         query, product_smiles=product_smiles, reaction_smiles=reaction_smiles,
-        transform=transform, outcome=outcome, project=project, k=k,
+        transform=transform, outcome=outcome, project=project,
+        date=date, date_from=date_from, date_to=date_to, k=k,
     )
 
 
@@ -1445,7 +1449,13 @@ TOOLS: list[Tool] = [
         "product first, then the named transform, then text, so it finds prior runs even "
         "when the wording differs. **Call this before proposing any synthetic step or "
         "design.** In-house results outrank published precedent for this lab, and failures "
-        "recorded here exist nowhere in the literature.",
+        "recorded here exist nowhere in the literature.\n\n"
+        "It also answers questions about a specific run: pass `date` for one day, or "
+        "`date_from`/`date_to` for a window, and the hits come back with their full "
+        "`conditions` — catalyst, ligand, reagent, base, solvent, temperature, time — plus "
+        "operator, scale and analysis. Filters alone are a valid query: `date` with no "
+        "search text lists everything run that day, newest first. Read the catalyst or "
+        "ligand off `conditions`; never infer it from the title.",
         _schema(
             {
                 "query": STR | {"description": "free text, e.g. 'hindered aniline amide coupling'"},
@@ -1454,6 +1464,9 @@ TOOLS: list[Tool] = [
                 "transform": STR | {"description": "named reaction, e.g. 'Amide coupling'"},
                 "outcome": STR | {"enum": ["success", "partial", "failure", "inconclusive"]},
                 "project": STR,
+                "date": STR | {"description": "exactly this day, ISO YYYY-MM-DD"},
+                "date_from": STR | {"description": "on or after this day, ISO YYYY-MM-DD"},
+                "date_to": STR | {"description": "on or before this day, ISO YYYY-MM-DD"},
                 "k": INT,
             },
         ),
@@ -1476,7 +1489,13 @@ TOOLS: list[Tool] = [
         "a reaction that worked, and especially one that did not. Outcome is success, "
         "partial, failure or inconclusive. Give the reaction as 'reactants>>product' where "
         "possible so later structural search can find it, and put the real detail in "
-        "observations: what was seen, not just that it failed.",
+        "observations: what was seen, not just that it failed.\n\n"
+        "Put each condition in its own key — catalyst, ligand, reagent, base, solvent, "
+        "temperature, time, equivalents, concentration, atmosphere, workup — rather than "
+        "writing them into a sentence. A condition in its own key can be retrieved later "
+        "by someone asking which catalyst or ligand was used; one buried in prose cannot. "
+        "Common abbreviations (cat, lig, temp, solv) are folded onto the standard spelling. "
+        "`date` defaults to today, so pass it explicitly when logging an older run.",
         _schema(
             {
                 "title": STR,
@@ -1484,7 +1503,11 @@ TOOLS: list[Tool] = [
                 "reaction_smiles": STR,
                 "product_smiles": STR,
                 "transform": STR,
-                "conditions": {"type": "object", "description": "reagent, base, solvent, temperature, time"},
+                "conditions": {
+                    "type": "object",
+                    "description": "one key per condition: catalyst, ligand, reagent, base, "
+                    "solvent, temperature, time, equivalents, concentration, atmosphere, workup",
+                },
                 "yield_percent": NUM,
                 "observations": STR,
                 "operator": STR,

@@ -435,6 +435,47 @@ recommendation:
 > Your logbook already has the answer for this exact substrate. HATU/DIPEA/DMF failed;
 > T3P/pyridine/EtOAc at 80 °C gave 71%. **Use T3P.**
 
+### Every record is addressable by date
+
+A logbook is also a record of *when*, so "what ligand did we use on the Suzuki on
+12 March?" has to be answerable. Each condition goes in its own field, which is what makes
+it retrievable later — a catalyst written into a sentence cannot be looked up:
+
+```bash
+parallax log add "Suzuki onto the ALK core" -o success -y 64 \
+  --date 2026-03-12 --operator RK -t "Suzuki-Miyaura coupling" \
+  --catalyst "Pd(OAc)2" --ligand SPhos --base K3PO4 --temp "100 C" --time "3 h" \
+  -c atmosphere=N2 -n "Full conversion by LCMS in 3 h."
+```
+
+Then a date is a complete query — no search text needed:
+
+```bash
+parallax log search --date 2026-03-12                 # everything run that day
+parallax log search --from 2026-03-01 --to 2026-03-31 # a window
+parallax log search suzuki --date 2026-03-12          # pin an ambiguous query
+```
+
+```
+  SUCCESS · 64%  Suzuki onto the ALK core
+      2026-03-12 · Suzuki-Miyaura coupling · RK
+      catalyst=Pd(OAc)2, ligand=SPhos, base=K3PO4, temperature=100 C, time=3 h
+```
+
+The agent reads the value straight out of the entry and quotes it with the entry id — and
+if the field is absent it says the logbook does not record it rather than naming a
+plausible catalyst. Three details make this work in practice:
+
+- **Common abbreviations are folded onto one spelling**, so `cat`, `lig`, `temp` and
+  `solv` land as `catalyst`, `ligand`, `temperature` and `solvent`. Two chemists typing
+  the same thing differently stay searchable as one field. Anything unrecognised is kept
+  verbatim.
+- **Month names are indexed**, because `2026-03-12` shares no words with "the Suzuki we
+  ran in March". The bare year deliberately is not a ranking signal — a shared year should
+  never be the reason an entry surfaces, and that is what the date window is for.
+- **Filters alone are a valid search.** A bare `--date`, or `--outcome failure` with no
+  query, lists what matches newest first instead of scoring everything to zero.
+
 ### It stays fast as it grows
 
 The markdown is authoritative, but re-reading every file per query does not scale. A
@@ -470,6 +511,17 @@ stays a plain linear scan. Different growth curve, different answer.
 **The logbook is your unpublished IP.** Tool results reach whichever model you use, so a
 hosted provider would see your failed routes. If that matters, run the agent against a
 local Ollama model — then nothing leaves the machine.
+
+**Neither `logbook/` nor `memory/` is committed.** Both are gitignored, so a clone starts
+with an empty workspace and nothing from one lab's bench — or from a test run — can reach
+another's. This is not only privacy: a shipped logbook entry would be read as `observed`
+in-house precedent by somebody else's agent, which is the one tier that outranks published
+work. Both directories are created on first use. To keep a scratch workspace out of the
+real one entirely, point `PARALLAX_WORKSPACE` somewhere else:
+
+```bash
+PARALLAX_WORKSPACE=$(mktemp -d) parallax log add "trial run" -o success
+```
 
 ## Continual memory
 
@@ -566,7 +618,7 @@ src/parallax/
                    and two interchangeable backends: Claude SDK or any
                    OpenAI-compatible endpoint
 .claude/skills/    11 workflow skills
-tests/            180 tests (`-m network` for the live ones)
+tests/            202 tests (`-m network` for the live ones)
 ```
 
 The 11 skills, which are plain markdown you can read and edit:

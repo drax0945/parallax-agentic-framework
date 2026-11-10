@@ -39,7 +39,7 @@ RDLogger.DisableLog("rdApp.*")
 
 FP_BITS = 2048
 FP_BYTES = FP_BITS // 8
-INDEX_VERSION = 1
+INDEX_VERSION = 2  # bumped when searchable() changed: stale tokens must rebuild
 _generator = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=FP_BITS)
 
 # popcount lookup, so Tanimoto over the whole matrix is a couple of numpy ops

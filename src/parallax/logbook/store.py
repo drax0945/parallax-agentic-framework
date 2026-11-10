@@ -36,9 +36,79 @@ _generator = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
 
 SLUG_RE = re.compile(r"[^a-z0-9]+")
 
+# Condition keys get normalised so that "what catalyst did we use" is answerable
+# across entries typed by different people. Anything not listed here is kept
+# verbatim — this normalises spelling, it does not restrict what can be recorded.
+CONDITION_ALIASES = {
+    "cat": "catalyst",
+    "catalyst_system": "catalyst",
+    "pd_source": "catalyst",
+    "metal": "catalyst",
+    "lig": "ligand",
+    "phosphine": "ligand",
+    "solv": "solvent",
+    "temp": "temperature",
+    "t": "temperature",
+    "rxn_time": "time",
+    "duration": "time",
+    "equiv": "equivalents",
+    "eq": "equivalents",
+    "conc": "concentration",
+    "atmosphere": "atmosphere",
+    "workup": "workup",
+}
+
+# The conditions worth asking for by name, in the order a chemist would write
+# them. Used in the tool description so the agent records them as separate keys
+# rather than burying them in prose, which is what makes them retrievable.
+CONDITION_KEYS = (
+    "catalyst", "ligand", "reagent", "base", "solvent", "temperature",
+    "time", "equivalents", "concentration", "atmosphere", "workup",
+)
+
+MONTHS = (
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+)
+
 
 def _slug(text: str, limit: int = 44) -> str:
     return SLUG_RE.sub("-", (text or "").lower()).strip("-")[:limit] or "entry"
+
+
+def normalise_conditions(conditions: dict[str, Any] | None) -> dict[str, Any]:
+    """Lower-case condition keys and fold common abbreviations onto one spelling."""
+    if not conditions:
+        return {}
+    out: dict[str, Any] = {}
+    for key, value in conditions.items():
+        clean = SLUG_RE.sub("_", str(key).lower()).strip("_")
+        out[CONDITION_ALIASES.get(clean, clean)] = value
+    return out
+
+
+def date_tokens(date: str | None) -> list[str]:
+    """Spellings of a date a person might actually type into a question.
+
+    An ISO date alone is not reachable by the words people use: "the Suzuki we
+    ran in March" shares nothing with `2026-03-12`. So the month name is added,
+    along with the year-month, which the ISO form does not yield on its own.
+
+    The bare year is deliberately *not* added — the tokeniser already splits
+    `2026-03-12` into `2026`, and a year on its own is weak enough that it
+    should never be the reason an entry surfaces. Use `date_from`/`date_to` when
+    the window matters; text search is for reaching the entry, not pinning it.
+    """
+    if not date:
+        return []
+    out = [date]
+    parts = date.split("-")
+    if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+        month = int(parts[1])
+        out.append(f"{parts[0]}-{parts[1]}")
+        if 1 <= month <= 12:
+            out.append(MONTHS[month - 1])
+    return out
 
 
 def _fingerprint(smiles: str | None):
@@ -94,8 +164,9 @@ class Experiment:
         return " ".join(
             [
                 self.title, self.title, self.transform or "", condition_text,
-                self.observations, self.project or "", " ".join(self.tags),
-                self.outcome,
+                self.observations, self.analysis or "", self.project or "",
+                " ".join(self.tags), self.outcome, self.operator or "",
+                self.scale or "", *date_tokens(self.date),
             ]
         )
 
@@ -178,7 +249,7 @@ class Experiment:
             reactant_smiles=_as_list(meta.get("reactant_smiles")),
             yield_percent=yield_percent,
             scale=meta.get("scale") or None,
-            conditions={k: v for k, v in (meta.get("conditions") or {}).items()},
+            conditions=normalise_conditions(meta.get("conditions")),
             observations=body,
             analysis=meta.get("analysis") or None,
             project=meta.get("project") or None,
@@ -360,7 +431,7 @@ class LogbookStore:
             reactant_smiles=reactants,
             yield_percent=yield_percent,
             scale=scale,
-            conditions=conditions or {},
+            conditions=normalise_conditions(conditions),
             observations=observations.strip(),
             analysis=analysis,
             project=project,
@@ -402,6 +473,9 @@ class LogbookStore:
         transform: str | None = None,
         outcome: str | None = None,
         project: str | None = None,
+        date: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
         k: int = 8,
         min_score: float = 0.05,
     ) -> dict[str, Any]:
@@ -410,6 +484,13 @@ class LogbookStore:
         Runs against the persistent index, so nothing re-reads the markdown and
         nothing re-computes a fingerprint. Only the entries actually returned
         have their bodies loaded.
+
+        `date` pins one day, `date_from`/`date_to` bound a window (ISO
+        YYYY-MM-DD, inclusive, either end optional). Dates are filters, not
+        ranking signals, so they narrow the set without distorting the order.
+        A search with filters but nothing to rank on — a bare date, or a bare
+        outcome — lists the matching entries newest first instead of scoring
+        them to zero and returning nothing.
         """
         index = self.index()
         if not len(index):
@@ -435,8 +516,11 @@ class LogbookStore:
                 position for position, row in enumerate(index.rows)
                 if row.get("transform") and transform_key in row["transform"].lower()
             }
+        # With nothing to rank on, filters alone are a legitimate query: list
+        # what matches rather than scoring everything to zero.
+        ranked = bool(query or product_smiles or transform_key or reactant_smiles)
         if not candidates:
-            candidates = set(range(len(index))) if not (query or product_smiles or transform_key) else set()
+            candidates = set() if ranked else set(range(len(index)))
 
         reactant_scores = None
         if reactant_smiles and len(candidates) <= 4000:
@@ -448,6 +532,13 @@ class LogbookStore:
             if outcome and row["outcome"] != outcome:
                 continue
             if project and (row.get("project") or "").lower() != project.lower():
+                continue
+            entry_date = row.get("date") or ""
+            if date and entry_date != date:
+                continue
+            if date_from and entry_date < date_from:
+                continue
+            if date_to and entry_date > date_to:
                 continue
 
             why: dict[str, Any] = {}
@@ -479,10 +570,16 @@ class LogbookStore:
                 score += 0.3 * overlap
                 why["text_overlap"] = round(overlap, 3)
 
-            if score >= min_score:
+            if not ranked:
+                why["listed"] = "matched the filters; no ranking signal given"
+                scored.append((0.0, why, position))
+            elif score >= min_score:
                 scored.append((score, why, position))
 
-        scored.sort(key=lambda row: row[0], reverse=True)
+        if ranked:
+            scored.sort(key=lambda row: row[0], reverse=True)
+        else:
+            scored.sort(key=lambda row: index.rows[row[2]].get("date") or "", reverse=True)
         top = scored[:k]
 
         results = []
@@ -501,6 +598,8 @@ class LogbookStore:
                     "product_smiles": summary.product_smiles,
                     "conditions": entry.conditions if entry else {},
                     "observations": (entry.observations[:600] if entry else ""),
+                    "analysis": entry.analysis if entry else None,
+                    "scale": entry.scale if entry else None,
                     "operator": entry.operator if entry else None,
                     "project": summary.project,
                     "relevance": round(score, 3),
@@ -508,16 +607,33 @@ class LogbookStore:
                 }
             )
 
+        applied = {
+            key: value
+            for key, value in (
+                ("outcome", outcome), ("project", project), ("date", date),
+                ("date_from", date_from), ("date_to", date_to),
+            )
+            if value
+        }
         return {
             "n_results": len(results),
             "store_size": len(index),
             "candidates_considered": len(candidates),
+            "filters": applied,
+            "ordering": "relevance" if ranked else "date, newest first",
             "results": results,
             "how_to_read": (
-                "In-house records, ranked by structural similarity first, then the named "
-                "transform, then text. These are observations from this lab: they outrank "
-                "published precedent here, but each is a single run — check the counts "
-                "before treating one as a rule."
+                (
+                    "In-house records, ranked by structural similarity first, then the "
+                    "named transform, then text. "
+                    if ranked
+                    else "In-house records matching the filters, newest first — nothing "
+                    "was ranked, so `relevance` is not meaningful here. "
+                )
+                + "These are observations from this lab: they outrank published precedent "
+                "here, but each is a single run — check the counts before treating one as "
+                "a rule. Conditions are quoted as recorded; an absent key means the "
+                "logbook does not record it."
             ),
         }
 

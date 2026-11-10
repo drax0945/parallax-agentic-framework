@@ -779,21 +779,36 @@ def log_add(
     project: Optional[str] = typer.Option(None, "--project", "-p"),
     operator: Optional[str] = typer.Option(None, "--operator"),
     date: Optional[str] = typer.Option(None, "--date", help="YYYY-MM-DD"),
+    catalyst: Optional[str] = typer.Option(None, "--catalyst", help="e.g. Pd(OAc)2"),
+    ligand: Optional[str] = typer.Option(None, "--ligand", help="e.g. SPhos"),
     reagent: Optional[str] = typer.Option(None, "--reagent"),
     base: Optional[str] = typer.Option(None, "--base"),
     solvent: Optional[str] = typer.Option(None, "--solvent"),
     temperature: Optional[str] = typer.Option(None, "--temp"),
+    time_taken: Optional[str] = typer.Option(None, "--time", help="e.g. '3 h'"),
+    scale: Optional[str] = typer.Option(None, "--scale", help="e.g. '250 mg'"),
+    condition: list[str] = typer.Option(
+        None, "--condition", "-c",
+        help="anything else, as key=value; repeatable (e.g. -c atmosphere=N2)",
+    ),
 ) -> None:
     """Record an experiment. Failures matter most — nothing else records them."""
     from .agent.tools import call_tool
 
     conditions = {k: v for k, v in
-                  {"reagent": reagent, "base": base, "solvent": solvent,
-                   "temperature": temperature}.items() if v}
+                  {"catalyst": catalyst, "ligand": ligand, "reagent": reagent,
+                   "base": base, "solvent": solvent, "temperature": temperature,
+                   "time": time_taken}.items() if v}
+    for pair in condition or []:
+        key, _, value = pair.partition("=")
+        if not value:
+            _fail(f"--condition expects key=value, got {pair!r}")
+        conditions[key.strip()] = value.strip()
     result = call_tool("logbook_add", {
         "title": title, "outcome": outcome, "reaction_smiles": reaction,
         "transform": transform, "yield_percent": yield_percent, "observations": notes,
-        "project": project, "operator": operator, "date": date, "conditions": conditions,
+        "project": project, "operator": operator, "date": date, "scale": scale,
+        "conditions": conditions,
     })
     if result.get("error"):
         _fail(result["error"])
@@ -809,21 +824,33 @@ def log_search(
     product: Optional[str] = typer.Option(None, "--product", help="SMILES — matches structurally"),
     transform: Optional[str] = typer.Option(None, "--transform", "-t"),
     outcome: Optional[str] = typer.Option(None, "--outcome", "-o"),
+    date: Optional[str] = typer.Option(None, "--date", help="exactly this day, YYYY-MM-DD"),
+    date_from: Optional[str] = typer.Option(None, "--from", help="on or after, YYYY-MM-DD"),
+    date_to: Optional[str] = typer.Option(None, "--to", help="on or before, YYYY-MM-DD"),
     k: int = typer.Option(8, "-k"),
 ) -> None:
-    """Find what this lab already tried."""
+    """Find what this lab already tried. A date alone is a valid search."""
     from .agent.tools import call_tool
 
     result = call_tool("logbook_search", {
         "query": " ".join(query or []) or None, "product_smiles": product,
-        "transform": transform, "outcome": outcome, "k": k,
+        "transform": transform, "outcome": outcome, "date": date,
+        "date_from": date_from, "date_to": date_to, "k": k,
     })
     head(f"{result['n_results']} of {result['store_size']} entries")
+    if result.get("filters"):
+        typer.echo(_c(f"  filtered on {result['filters']} · by {result['ordering']}", DIM))
     for hit in result["results"]:
         colour = GREEN if hit["outcome"] == "success" else (YELLOW if hit["outcome"] == "partial" else RED)
         y = f" · {hit['yield_percent']:g}%" if hit.get("yield_percent") is not None else ""
-        typer.echo(f"\n  [{hit['relevance']}] {_c(hit['outcome'].upper(), colour)}{y}  {hit['title']}")
-        typer.echo(_c(f"      {hit['date']} · {hit.get('transform') or '—'} · matched on {hit['matched_on']}", DIM))
+        rank = f"[{hit['relevance']}] " if result["ordering"] == "relevance" else ""
+        typer.echo(f"\n  {rank}{_c(hit['outcome'].upper(), colour)}{y}  {hit['title']}")
+        why = (
+            f" · matched on {hit['matched_on']}"
+            if result["ordering"] == "relevance"
+            else (f" · {hit['operator']}" if hit.get("operator") else "")
+        )
+        typer.echo(_c(f"      {hit['date']} · {hit.get('transform') or '—'}{why}", DIM))
         if hit.get("conditions"):
             typer.echo(_c(f"      {', '.join(f'{k}={v}' for k, v in hit['conditions'].items())}", DIM))
         if hit.get("observations"):
