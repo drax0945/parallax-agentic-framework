@@ -196,6 +196,13 @@ def _logbook_payload() -> dict[str, Any]:
             "projects": sorted(summary.get("by_project", {})),
             "transforms": summary.get("by_transform", {}),
             "recent": recent(6),
+            "ask_examples": [
+                "What have we already tried on this substrate?",
+                "What conditions did we use on the run on {date}?",
+                "What is our real success rate for amide couplings?",
+                "Show me every failure in the {project} project",
+                "Plan a route to this compound, checking our logbook first",
+            ],
             "why": (
                 "In-house results are the top evidence tier: they outrank published "
                 "precedent here, and they are the only record of what did not work."
@@ -518,6 +525,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send((HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
         elif route == "/api/scope":
             self._json(scope_payload())
+        elif route == "/api/logbook":
+            self._json(_logbook_payload())
         elif route == "/api/runtime":
             self._json(runtime_payload((params.get("provider") or [None])[0]))
         elif route == "/api/depict":

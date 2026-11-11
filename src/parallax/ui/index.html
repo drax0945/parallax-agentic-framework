@@ -108,7 +108,15 @@ select {
 .ghost[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
 
 /* ---------- scope drawer ---------- */
-#scope[hidden] { display: none; }
+#scope[hidden], #logbook[hidden] { display: none; }
+#logbook { border-bottom: 1px solid var(--line); background: var(--sunken); max-height: 58vh; overflow-y: auto; }
+.badge {
+  display: inline-block; margin-left: 7px; padding: 1px 6px; border-radius: 100px;
+  background: var(--accent); color: #fff; font-size: 10px; font-weight: 600;
+  font-variant-numeric: tabular-nums; vertical-align: 1px;
+}
+.ghost[aria-expanded="true"] .badge { background: var(--accent); }
+.asklist { display: flex; flex-direction: column; gap: 8px; margin-top: 2px; }
 #scope { border-bottom: 1px solid var(--line); background: var(--sunken); max-height: 58vh; overflow-y: auto; }
 .scope-inner { padding: 22px; max-width: 1180px; margin: 0 auto; }
 .tabs { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 18px; }
@@ -410,6 +418,10 @@ textarea:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px
     <option value="claude">Claude</option>
   </select>
 
+  <button class="ghost" id="logbook-toggle" aria-expanded="false" aria-controls="logbook">
+    Logbook<span class="badge" id="logbook-count" hidden></span>
+  </button>
+
   <button class="ghost" id="scope-toggle" aria-expanded="false" aria-controls="scope">
     What can it do?
   </button>
@@ -419,7 +431,6 @@ textarea:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px
   <div class="scope-inner">
     <div class="tabs" role="tablist">
       <button class="tab" role="tab" data-pane="tiers" aria-selected="true">Evidence tiers</button>
-      <button class="tab" role="tab" data-pane="logbook" aria-selected="false">Lab logbook</button>
       <button class="tab" role="tab" data-pane="tools" aria-selected="false">Tools</button>
       <button class="tab" role="tab" data-pane="skills" aria-selected="false">Skills</button>
       <button class="tab" role="tab" data-pane="endpoints" aria-selected="false">Endpoints &amp; profiles</button>
@@ -428,7 +439,6 @@ textarea:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px
       <button class="tab" role="tab" data-pane="runtime" aria-selected="false">Model backends</button>
     </div>
     <div class="pane" id="pane-tiers"></div>
-    <div class="pane" id="pane-logbook" hidden></div>
     <div class="pane" id="pane-tools" hidden></div>
     <div class="pane" id="pane-skills" hidden></div>
     <div class="pane" id="pane-endpoints" hidden></div>
@@ -436,6 +446,10 @@ textarea:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px
     <div class="pane" id="pane-limits" hidden></div>
     <div class="pane" id="pane-runtime" hidden></div>
   </div>
+</section>
+
+<section id="logbook" hidden>
+  <div class="scope-inner" id="logbook-inner"></div>
 </section>
 
 <main>
@@ -556,179 +570,6 @@ function renderScope(d) {
   });
   tiers.append(box);
 
-  const lb = $('#pane-logbook');
-
-  function renderLogbook(L) {
-    lb.textContent = '';
-    if (L.error) { lb.append(el('p','lede','The logbook could not be read: ' + L.error)); return; }
-
-    if (!L.n_entries) {
-      lb.append(el('p','lede','The logbook is empty. It holds what this lab actually ran — successes and failures both — and those records are the top evidence tier: they outrank published precedent here. Failures matter most, because the literature almost never reports them.'));
-    } else {
-      lb.append(el('p','lede', L.why));
-      const row = el('div','grid');
-      const counts = Object.entries(L.by_outcome || {}).map(([k,v]) => `${v} ${k}`).join(' · ');
-      row.append(card(`${L.n_entries} ${L.n_entries === 1 ? 'entry' : 'entries'}`, counts || '—'));
-      row.append(card('Failures recorded', `${L.failures_recorded} — the records that exist nowhere else`));
-      row.append(card('Carry a structure', `${L.with_structures} of ${L.n_entries}, so structural search can find them`));
-      if (L.median_yield_percent !== null && L.median_yield_percent !== undefined)
-        row.append(card('Median yield', `${L.median_yield_percent}%`));
-      if (L.date_range && L.date_range[0])
-        row.append(card('Spans', L.date_range[0] === L.date_range[1] ? L.date_range[0] : `${L.date_range[0]} to ${L.date_range[1]}`));
-      if (L.projects && L.projects.length) row.append(card('Projects', L.projects.join(', ')));
-      lb.append(row);
-
-      if (L.recent && L.recent.length) {
-        lb.append(el('p','lede','Most recent'));
-        const box = el('div','card');
-        L.recent.forEach(r => {
-          const line = el('div','logrow');
-          line.append(el('span','when', r.date));
-          const o = el('span','outcome', r.outcome); o.dataset.o = r.outcome;
-          line.append(o);
-          line.append(el('span','what', r.title));
-          const bits = [];
-          if (r.yield_percent !== null && r.yield_percent !== undefined) bits.push(r.yield_percent + '%');
-          if (r.transform) bits.push(r.transform);
-          line.append(el('span','meta', bits.join(' · ')));
-          box.append(line);
-        });
-        lb.append(box);
-      }
-    }
-    lb.append(buildForm());
-    lb.append(el('p','lede','Ask about a run by date — "what solvent did we use on 10 November?" — and the answer is quoted from the entry, with its id. A field the logbook does not record is reported as missing, never filled in.'));
-  }
-
-  function field(label, node, hint) {
-    const f = el('div','field');
-    f.append(el('label', null, label), node);
-    if (hint) f.append(el('span','hint', hint));
-    return f;
-  }
-  function input(placeholder, attrs) {
-    const i = document.createElement('input');
-    if (placeholder) i.placeholder = placeholder;
-    Object.assign(i, attrs || {});
-    return i;
-  }
-
-  function buildForm() {
-    const wrap = el('div','addwrap');
-    const head = el('div','addhead');
-    head.append(el('p','lede','Record a run'));
-    wrap.append(head);
-
-    const box = el('div','card');
-    const grid = el('div','formgrid');
-
-    const fTitle = input('HATU coupling onto 2,6-dichloroaniline');
-    const fOutcome = document.createElement('select');
-    ['success','partial','failure','inconclusive'].forEach(o => {
-      const opt = document.createElement('option'); opt.value = o; opt.textContent = o; fOutcome.append(opt);
-    });
-    const fDate = input('', { type: 'date' });
-    const fYield = input('64', { type: 'number', step: 'any', min: '0', max: '100' });
-    const fTransform = input('Amide coupling (acid + amine)');
-    const fOperator = input('RK');
-    const fProject = input('ALK series');
-    const fScale = input('250 mg');
-    const fReaction = input('reactants>>product');
-    const fAnalysis = input('LCMS, single peak');
-    const fTags = input('scaleup, alk');
-    const fNotes = document.createElement('textarea');
-    fNotes.placeholder = 'What you actually saw. "No conversion by LCMS after 18 h. Aniline too hindered." — not just that it failed.';
-
-    grid.append(
-      field('What was run *', fTitle),
-      field('Outcome *', fOutcome),
-      field('Date', fDate, 'defaults to today'),
-      field('Yield %', fYield),
-      field('Transform', fTransform),
-      field('Operator', fOperator),
-      field('Project', fProject),
-      field('Scale', fScale),
-      field('Reaction SMILES', fReaction, 'lets structural search find this run later'),
-      field('Analysis', fAnalysis),
-      field('Tags', fTags, 'comma separated')
-    );
-    const notes = field('Observations', fNotes);
-    notes.classList.add('wide');
-    grid.append(notes);
-    box.append(grid);
-
-    // conditions: free key/value, because the logbook has no vocabulary
-    const condWrap = el('div','field wide');
-    condWrap.append(el('label', null, 'Conditions'));
-    const rows = el('div');
-    condWrap.append(rows);
-    condWrap.append(el('span','hint','One detail per row, named however you name it — catalyst, ligand, stir rate, degassing, ELN number. Keys are stored exactly as typed, and anything recorded here can be retrieved later by date.'));
-
-    function addCond(k, v) {
-      const r = el('div','condrow');
-      const key = input('key, e.g. catalyst', { value: k || '' });
-      const val = input('value, e.g. Pd(OAc)2', { value: v || '' });
-      const del = document.createElement('button');
-      del.type = 'button'; del.textContent = '\u00d7'; del.title = 'remove';
-      del.onclick = () => { r.remove(); if (!rows.children.length) addCond(); };
-      r.append(key, val, del);
-      rows.append(r);
-      key.addEventListener('input', () => {
-        if (r === rows.lastElementChild && key.value.trim()) addCond();
-      });
-      return r;
-    }
-    addCond();
-    box.append(condWrap);
-
-    const foot = el('div','formfoot');
-    const save = document.createElement('button');
-    save.className = 'primary'; save.type = 'button'; save.textContent = 'Record it';
-    const note = el('span','formnote');
-    foot.append(save, note);
-    box.append(foot);
-
-    save.onclick = async () => {
-      note.className = 'formnote'; note.textContent = '';
-      if (!fTitle.value.trim()) {
-        note.className = 'formnote bad'; note.textContent = 'Say what was run.'; fTitle.focus(); return;
-      }
-      save.disabled = true; save.textContent = 'Recording…';
-      const conditions = [...rows.children].map(r => ({
-        key: r.children[0].value, value: r.children[1].value
-      }));
-      try {
-        const res = await fetch('/api/logbook', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: fTitle.value, outcome: fOutcome.value, date: fDate.value,
-            yield_percent: fYield.value, transform: fTransform.value,
-            operator: fOperator.value, project: fProject.value, scale: fScale.value,
-            reaction_smiles: fReaction.value, analysis: fAnalysis.value,
-            tags: fTags.value, observations: fNotes.value, conditions
-          })
-        });
-        const body = await res.json();
-        if (!res.ok) {
-          note.className = 'formnote bad'; note.textContent = body.error || ('failed: HTTP ' + res.status);
-          save.disabled = false; save.textContent = 'Record it';
-          return;
-        }
-        renderLogbook(body.logbook);
-        const fresh = lb.querySelector('.formnote');
-        if (fresh) { fresh.className = 'formnote good'; fresh.textContent = 'Recorded — ' + body.summary; }
-      } catch (e) {
-        note.className = 'formnote bad'; note.textContent = 'Could not reach the console: ' + e.message;
-        save.disabled = false; save.textContent = 'Record it';
-      }
-    };
-    wrap.append(box);
-    return wrap;
-  }
-
-  renderLogbook(d.logbook || { n_entries: 0, recent: [] });
-
   const tools = $('#pane-tools');
   tools.append(el('p','lede',`${d.n_tools} tools. None of them calls a language model — the model only decides which to use and writes the prose.`));
   const groups = el('div','grid');
@@ -795,10 +636,234 @@ function selectTab(tab) {
 }
 document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => selectTab(tab)));
 
+const lb = $('#logbook-inner');
+
+function renderLogbook(L) {
+  lb.textContent = '';
+  if (L.error) { lb.append(el('p','lede','The logbook could not be read: ' + L.error)); return; }
+
+  if (!L.n_entries) {
+    lb.append(el('p','lede','The logbook is empty. It holds what this lab actually ran — successes and failures both — and those records are the top evidence tier: they outrank published precedent here. Failures matter most, because the literature almost never reports them.'));
+  } else {
+    lb.append(el('p','lede', L.why));
+    const row = el('div','grid');
+    const counts = Object.entries(L.by_outcome || {}).map(([k,v]) => `${v} ${k}`).join(' · ');
+    row.append(card(`${L.n_entries} ${L.n_entries === 1 ? 'entry' : 'entries'}`, counts || '—'));
+    row.append(card('Failures recorded', `${L.failures_recorded} — the records that exist nowhere else`));
+    row.append(card('Carry a structure', `${L.with_structures} of ${L.n_entries}, so structural search can find them`));
+    if (L.median_yield_percent !== null && L.median_yield_percent !== undefined)
+      row.append(card('Median yield', `${L.median_yield_percent}%`));
+    if (L.date_range && L.date_range[0])
+      row.append(card('Spans', L.date_range[0] === L.date_range[1] ? L.date_range[0] : `${L.date_range[0]} to ${L.date_range[1]}`));
+    if (L.projects && L.projects.length) row.append(card('Projects', L.projects.join(', ')));
+    lb.append(row);
+
+    if (L.recent && L.recent.length) {
+      lb.append(el('p','lede','Most recent'));
+      const box = el('div','card');
+      L.recent.forEach(r => {
+        const line = el('div','logrow');
+        line.append(el('span','when', r.date));
+        const o = el('span','outcome', r.outcome); o.dataset.o = r.outcome;
+        line.append(o);
+        line.append(el('span','what', r.title));
+        const bits = [];
+        if (r.yield_percent !== null && r.yield_percent !== undefined) bits.push(r.yield_percent + '%');
+        if (r.transform) bits.push(r.transform);
+        line.append(el('span','meta', bits.join(' · ')));
+        box.append(line);
+      });
+      lb.append(box);
+    }
+  }
+  lb.append(askBlock(L));
+  lb.append(buildForm());
+}
+
+function field(label, node, hint) {
+  const f = el('div','field');
+  f.append(el('label', null, label), node);
+  if (hint) f.append(el('span','hint', hint));
+  return f;
+}
+function input(placeholder, attrs) {
+  const i = document.createElement('input');
+  if (placeholder) i.placeholder = placeholder;
+  Object.assign(i, attrs || {});
+  return i;
+}
+
+function buildForm() {
+  const wrap = el('div','addwrap');
+  const head = el('div','addhead');
+  head.append(el('p','lede','Record a run'));
+  wrap.append(head);
+
+  const box = el('div','card');
+  const grid = el('div','formgrid');
+
+  const fTitle = input('HATU coupling onto 2,6-dichloroaniline');
+  const fOutcome = document.createElement('select');
+  ['success','partial','failure','inconclusive'].forEach(o => {
+    const opt = document.createElement('option'); opt.value = o; opt.textContent = o; fOutcome.append(opt);
+  });
+  const fDate = input('', { type: 'date' });
+  const fYield = input('64', { type: 'number', step: 'any', min: '0', max: '100' });
+  const fTransform = input('Amide coupling (acid + amine)');
+  const fOperator = input('RK');
+  const fProject = input('ALK series');
+  const fScale = input('250 mg');
+  const fReaction = input('reactants>>product');
+  const fAnalysis = input('LCMS, single peak');
+  const fTags = input('scaleup, alk');
+  const fNotes = document.createElement('textarea');
+  fNotes.placeholder = 'What you actually saw. "No conversion by LCMS after 18 h. Aniline too hindered." — not just that it failed.';
+
+  grid.append(
+    field('What was run *', fTitle),
+    field('Outcome *', fOutcome),
+    field('Date', fDate, 'defaults to today'),
+    field('Yield %', fYield),
+    field('Transform', fTransform),
+    field('Operator', fOperator),
+    field('Project', fProject),
+    field('Scale', fScale),
+    field('Reaction SMILES', fReaction, 'lets structural search find this run later'),
+    field('Analysis', fAnalysis),
+    field('Tags', fTags, 'comma separated')
+  );
+  const notes = field('Observations', fNotes);
+  notes.classList.add('wide');
+  grid.append(notes);
+  box.append(grid);
+
+  // conditions: free key/value, because the logbook has no vocabulary
+  const condWrap = el('div','field wide');
+  condWrap.append(el('label', null, 'Conditions'));
+  const rows = el('div');
+  condWrap.append(rows);
+  condWrap.append(el('span','hint','One detail per row, named however you name it — catalyst, ligand, stir rate, degassing, ELN number. Keys are stored exactly as typed, and anything recorded here can be retrieved later by date.'));
+
+  function addCond(k, v) {
+    const r = el('div','condrow');
+    const key = input('key, e.g. catalyst', { value: k || '' });
+    const val = input('value, e.g. Pd(OAc)2', { value: v || '' });
+    const del = document.createElement('button');
+    del.type = 'button'; del.textContent = '\u00d7'; del.title = 'remove';
+    del.onclick = () => { r.remove(); if (!rows.children.length) addCond(); };
+    r.append(key, val, del);
+    rows.append(r);
+    key.addEventListener('input', () => {
+      if (r === rows.lastElementChild && key.value.trim()) addCond();
+    });
+    return r;
+  }
+  addCond();
+  box.append(condWrap);
+
+  const foot = el('div','formfoot');
+  const save = document.createElement('button');
+  save.className = 'primary'; save.type = 'button'; save.textContent = 'Record it';
+  const note = el('span','formnote');
+  foot.append(save, note);
+  box.append(foot);
+
+  save.onclick = async () => {
+    note.className = 'formnote'; note.textContent = '';
+    if (!fTitle.value.trim()) {
+      note.className = 'formnote bad'; note.textContent = 'Say what was run.'; fTitle.focus(); return;
+    }
+    save.disabled = true; save.textContent = 'Recording…';
+    const conditions = [...rows.children].map(r => ({
+      key: r.children[0].value, value: r.children[1].value
+    }));
+    try {
+      const res = await fetch('/api/logbook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: fTitle.value, outcome: fOutcome.value, date: fDate.value,
+          yield_percent: fYield.value, transform: fTransform.value,
+          operator: fOperator.value, project: fProject.value, scale: fScale.value,
+          reaction_smiles: fReaction.value, analysis: fAnalysis.value,
+          tags: fTags.value, observations: fNotes.value, conditions
+        })
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        note.className = 'formnote bad'; note.textContent = body.error || ('failed: HTTP ' + res.status);
+        save.disabled = false; save.textContent = 'Record it';
+        return;
+      }
+      renderLogbook(body.logbook);
+      const fresh = lb.querySelector('.formnote');
+      if (fresh) { fresh.className = 'formnote good'; fresh.textContent = 'Recorded — ' + body.summary; }
+    } catch (e) {
+      note.className = 'formnote bad'; note.textContent = 'Could not reach the console: ' + e.message;
+      save.disabled = false; save.textContent = 'Record it';
+    }
+  };
+  wrap.append(box);
+  return wrap;
+}
+
+function askBlock(L) {
+  const wrap = el('div','addwrap');
+  wrap.append(el('p','lede','Ask the agent about it'));
+  const box = el('div','card');
+  box.append(el('p',null,'These records are not a separate filing cabinet. The agent reaches them with the same tool call it uses for ChEMBL, PubChem or the patent literature \u2014 and because in-house results are the top evidence tier, it checks here first and says so when your own bench contradicts a paper.'));
+  box.append(el('p',null,'Answers about a particular run are quoted from the entry, with its id and date. A field the logbook does not record is reported as missing, never filled in.'));
+  const list = el('div','asklist');
+  (L.ask_examples || []).forEach(q => {
+    const text = q
+      .replace('{date}', (L.recent && L.recent[0] && L.recent[0].date) || 'that date')
+      .replace('{project}', (L.projects && L.projects[0]) || 'that');
+    const b = document.createElement('button');
+    b.className = 'example'; b.type = 'button'; b.textContent = text;
+    list.append(b);
+  });
+  box.append(list);
+  wrap.append(box);
+  return wrap;
+}
+
+async function loadLogbook() {
+  try {
+    const L = await (await fetch('/api/logbook')).json();
+    renderLogbook(L);
+    setLogbookCount(L.n_entries);
+  } catch (e) {
+    $('#logbook-inner').textContent = '';
+    $('#logbook-inner').append(el('p','lede','Could not read the logbook: ' + e.message));
+  }
+}
+
+function setLogbookCount(n) {
+  const badge = $('#logbook-count');
+  badge.textContent = n || '';
+  badge.hidden = !n;
+}
+
+/* one drawer at a time */
+function toggleDrawer(which) {
+  const pairs = { scope: ['#scope','#scope-toggle'], logbook: ['#logbook','#logbook-toggle'] };
+  const [sel, btnSel] = pairs[which];
+  const drawer = $(sel), open = drawer.hidden;
+  Object.entries(pairs).forEach(([k, [s, b]]) => {
+    $(s).hidden = true; $(b).setAttribute('aria-expanded','false');
+  });
+  drawer.hidden = !open;
+  $(btnSel).setAttribute('aria-expanded', String(open));
+  return open;
+}
+
+$('#logbook-toggle').addEventListener('click', async () => {
+  if (toggleDrawer('logbook')) await loadLogbook();
+});
+loadLogbook();
+
 $('#scope-toggle').addEventListener('click', async () => {
-  const drawer = $('#scope'), btn = $('#scope-toggle');
-  const open = drawer.hidden;
-  drawer.hidden = !open; btn.setAttribute('aria-expanded', String(open));
+  const open = toggleDrawer('scope');
   if (open && !scope) { scope = await (await fetch('/api/scope')).json(); renderScope(scope); }
   if (open) selectTab(document.querySelector('.tab'));
 });
@@ -929,7 +994,12 @@ $('#q').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#composer').requestSubmit(); }
 });
 document.addEventListener('click', (e) => {
-  if (e.target.classList.contains('example')) { $('#q').value = e.target.textContent.trim(); $('#q').focus(); }
+  if (!e.target.classList.contains('example')) return;
+  $('#q').value = e.target.textContent.trim();
+  // an example picked from inside a drawer should not leave it covering the thread
+  ['#scope','#logbook'].forEach(s => { if (!$(s).hidden) $(s).hidden = true; });
+  ['#scope-toggle','#logbook-toggle'].forEach(s => $(s).setAttribute('aria-expanded','false'));
+  $('#q').focus();
 });
 // decorative microplate row; a handful tinted, as on the marque
 (function paintPlate() {

@@ -210,13 +210,21 @@ class TestLogbookInTheConsole:
         assert book["n_entries"] == 0 and book["recent"] == []
         settings.cache_clear()
 
-    def test_the_page_renders_the_logbook_tab(self):
+    def test_the_logbook_is_its_own_drawer_not_a_scope_tab(self):
         import pathlib
 
         page = (pathlib.Path("src/parallax/ui/index.html")).read_text(encoding="utf-8")
-        assert 'data-pane="logbook"' in page
-        assert 'id="pane-logbook"' in page
+        assert 'id="logbook-toggle"' in page and '<section id="logbook"' in page
+        # it used to be buried inside "What can it do?"
+        assert 'data-pane="logbook"' not in page and 'id="pane-logbook"' not in page
         assert 'data-t="observed"' in page
+
+    def test_the_drawer_offers_agent_queries(self):
+        import pathlib
+
+        page = (pathlib.Path("src/parallax/ui/index.html")).read_text(encoding="utf-8")
+        assert "Ask the agent about it" in page
+        assert "ask_examples" in page
 
 
 class TestLogbookStatsShape:
@@ -353,3 +361,31 @@ class TestRecordingFromTheConsole:
 
         page = pathlib.Path("src/parallax/ui/index.html").read_text(encoding="utf-8")
         assert "/api/logbook" in page and "Record it" in page
+
+
+class TestLogbookIsReachableAsItsOwnThing:
+    def test_there_is_a_logbook_route_of_its_own(self):
+        """The drawer refreshes without refetching the whole scope payload."""
+        from parallax.ui.server import _logbook_payload
+
+        payload = _logbook_payload()
+        assert "n_entries" in payload and "recent" in payload
+
+    def test_the_agent_examples_are_answerable_by_real_tools(self):
+        from parallax.agent.tools import TOOL_MAP
+        from parallax.ui.server import _logbook_payload
+
+        examples = _logbook_payload()["ask_examples"]
+        assert len(examples) >= 4
+        # each example maps onto a tool that actually exists
+        for name in ("logbook_search", "logbook_track_record", "reaction_precedent_search"):
+            assert name in TOOL_MAP
+
+    def test_the_examples_have_fillable_placeholders_only(self):
+        import re
+
+        from parallax.ui.server import _logbook_payload
+
+        for q in _logbook_payload()["ask_examples"]:
+            for token in re.findall(r"\{(\w+)\}", q):
+                assert token in {"date", "project"}, q
