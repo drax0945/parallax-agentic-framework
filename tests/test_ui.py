@@ -16,7 +16,9 @@ class TestScope:
         scope = scope_payload()
         assert scope["n_tools"] == len(TOOLS)
         assert len(scope["skills"]) >= 11
-        assert {t["tier"] for t in scope["tiers"]} == {"measured", "computed", "modelled"}
+        assert [t["tier"] for t in scope["tiers"]] == [
+            "observed", "measured", "computed", "modelled"
+        ]  # same order as the prompt: in-house evidence first
         assert scope["n_reaction_templates"] >= 30
         assert scope["limits"] and scope["chemical_scope"]
 
@@ -167,3 +169,105 @@ class TestClaudeToolResults:
         assert "tool_result" in source
         stream = inspect.getsource(loop.stream_session)
         assert "UserMessage" in stream and "ToolResultBlock" in stream
+
+
+class TestLogbookInTheConsole:
+    """The logbook is the top evidence tier, so the console has to show it."""
+
+    def test_the_observed_tier_is_advertised_first(self):
+        tiers = scope_payload()["tiers"]
+        assert tiers[0]["tier"] == "observed"
+        assert "this lab" in tiers[0]["meaning"].lower()
+
+    def test_the_scope_carries_live_logbook_state(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PARALLAX_WORKSPACE", str(tmp_path))
+        from parallax.config import settings
+
+        settings.cache_clear()
+        from parallax.logbook import add
+
+        add(title="Suzuki trial", outcome="failure", date="2026-05-04",
+            transform="Suzuki-Miyaura coupling", conditions={"solvent": "toluene"},
+            observations="Protodeboronation.", project="X")
+
+        book = scope_payload()["logbook"]
+        assert book["n_entries"] == 1
+        assert book["by_outcome"] == {"failure": 1}
+        assert book["failures_recorded"] == 1
+        assert book["recent"][0]["title"] == "Suzuki trial"
+        assert book["date_range"] == ["2026-05-04", "2026-05-04"]
+
+        # and it went to the temporary workspace, not the real one
+        assert (tmp_path / "logbook" / "entries").exists()
+        settings.cache_clear()
+
+    def test_an_empty_logbook_is_reported_not_hidden(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PARALLAX_WORKSPACE", str(tmp_path))
+        from parallax.config import settings
+
+        settings.cache_clear()
+        book = scope_payload()["logbook"]
+        assert book["n_entries"] == 0 and book["recent"] == []
+        settings.cache_clear()
+
+    def test_the_page_renders_the_logbook_tab(self):
+        import pathlib
+
+        page = (pathlib.Path("src/parallax/ui/index.html")).read_text(encoding="utf-8")
+        assert 'data-pane="logbook"' in page
+        assert 'id="pane-logbook"' in page
+        assert 'data-t="observed"' in page
+
+
+class TestLogbookStatsShape:
+    def test_the_search_index_stats_are_not_overwritten(self, tmp_path):
+        """`index` was assigned twice in the same dict; the stats were lost."""
+        from parallax.logbook.store import LogbookStore
+
+        book = LogbookStore(root=tmp_path / "lb")
+        book.add(title="x", outcome="success", product_smiles="CCO")
+        summary = book.stats()
+        assert summary["search_index"]["indexed_entries"] == 1
+        assert summary["index"].endswith("LOGBOOK.md")  # the human index path
+
+    def test_recent_is_newest_first(self, tmp_path):
+        from parallax.logbook.store import LogbookStore
+
+        book = LogbookStore(root=tmp_path / "lb")
+        for day in ("2026-01-05", "2026-03-20", "2026-02-11"):
+            book.add(title=f"run {day}", outcome="success", date=day)
+        assert [r["date"] for r in book.recent()] == [
+            "2026-03-20", "2026-02-11", "2026-01-05"
+        ]
+
+
+class TestStoresFollowTheWorkspace:
+    """A store must never keep writing to the workspace it first saw."""
+
+    def test_the_logbook_store_follows_a_workspace_change(self, tmp_path, monkeypatch):
+        from parallax.config import settings
+        from parallax.logbook import store
+
+        first, second = tmp_path / "a", tmp_path / "b"
+        monkeypatch.setenv("PARALLAX_WORKSPACE", str(first))
+        settings.cache_clear()
+        assert store().root == first / "logbook"
+
+        monkeypatch.setenv("PARALLAX_WORKSPACE", str(second))
+        settings.cache_clear()
+        assert store().root == second / "logbook"  # was stuck on `first`
+        settings.cache_clear()
+
+    def test_the_memory_store_follows_a_workspace_change(self, tmp_path, monkeypatch):
+        from parallax.config import settings
+        from parallax.memory import store
+
+        first, second = tmp_path / "a", tmp_path / "b"
+        monkeypatch.setenv("PARALLAX_WORKSPACE", str(first))
+        settings.cache_clear()
+        assert store().root == first / "memory"
+
+        monkeypatch.setenv("PARALLAX_WORKSPACE", str(second))
+        settings.cache_clear()
+        assert store().root == second / "memory"
+        settings.cache_clear()

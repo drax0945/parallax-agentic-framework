@@ -690,7 +690,7 @@ class LogbookStore:
             "by_transform": dict(sorted(transforms.items(), key=lambda kv: -kv[1])[:12]),
             "by_project": projects,
             "with_structures": sum(1 for e in entries if e.product_smiles),
-            "index": index.stats(),
+            "search_index": index.stats(),
             "median_yield_percent": round(sorted(yields)[len(yields) // 2], 1) if yields else None,
             "date_range": [min((e.date for e in entries), default=None),
                            max((e.date for e in entries), default=None)],
@@ -700,6 +700,28 @@ class LogbookStore:
                 "almost never reports them."
             ),
         }
+
+    def recent(self, limit: int = 8) -> list[dict[str, Any]]:
+        """The newest entries, summarised. Reads the index, not the bodies."""
+        index = self.index()
+        rows = sorted(
+            range(len(index)), key=lambda i: index.rows[i].get("date") or "", reverse=True
+        )
+        out = []
+        for position in rows[:limit]:
+            entry = index.entry_at(position)
+            out.append(
+                {
+                    "id": entry.id,
+                    "date": entry.date,
+                    "title": entry.title,
+                    "outcome": entry.outcome,
+                    "yield_percent": entry.yield_percent,
+                    "transform": entry.transform,
+                    "project": entry.project,
+                }
+            )
+        return out
 
     def import_rows(self, rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
         """Bulk ingest, e.g. from an ELN export."""
@@ -716,9 +738,18 @@ _STORE: LogbookStore | None = None
 
 
 def store() -> LogbookStore:
+    """The store for the *current* workspace.
+
+    Keyed on the resolved root, not built once and kept. A module global that
+    ignored a later `PARALLAX_WORKSPACE` change meant anything switching
+    workspace mid-process — a test, a second console, a scripted run — silently
+    kept writing to the first one. That put test records in a real lab's
+    logbook.
+    """
     global _STORE
-    if _STORE is None:
-        _STORE = LogbookStore()
+    root = settings().logbook_dir
+    if _STORE is None or _STORE.root != root:
+        _STORE = LogbookStore(root=root)
     return _STORE
 
 
@@ -732,6 +763,10 @@ def search(query: str | None = None, **kwargs: Any) -> dict[str, Any]:
 
 def outcomes_for_transform(transform: str, **kwargs: Any) -> dict[str, Any]:
     return store().outcomes_for_transform(transform, **kwargs)
+
+
+def recent(limit: int = 8) -> list[dict[str, Any]]:
+    return store().recent(limit=limit)
 
 
 def stats() -> dict[str, Any]:

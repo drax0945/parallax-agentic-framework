@@ -6,10 +6,12 @@ __pycache__/
 .env
 
 # Parallax runtime state: caches, trained models, run transcripts, audit log.
-.parallax/cache/
-.parallax/models/
-.parallax/runs/
-.parallax/safety-audit.jsonl
+#
+# The whole directory, not the four paths that exist today. Listing them
+# individually meant anything a later version wrote beside them — a session
+# file, a cached credential — would have been visible to `git add -A`.
+# Nothing under here is source: it all rebuilds or re-downloads.
+.parallax/
 
 # Workspace data — the lab's, not the repo's.
 #
@@ -28,6 +30,21 @@ __pycache__/
 logbook/
 memory/
 reports/
+
+# Credentials, belt and braces. Nothing here should ever be written into the
+# repo, and none of it is today — these patterns exist so that a future slip
+# is caught by git rather than by a reader of the published history.
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+.netrc
+.npmrc
+.claude/.credentials.json
+.claude/settings.local.json
 
 # IDE
 .idea/

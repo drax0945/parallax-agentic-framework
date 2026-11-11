@@ -122,6 +122,12 @@ def scope_payload() -> dict[str, Any]:
     return {
         "tiers": [
             {
+                "tier": "observed",
+                "meaning": "This lab ran it and recorded the result.",
+                "cites": "the logbook entry, by id and date",
+                "sources": "logbook/entries — written by you, not downloaded",
+            },
+            {
                 "tier": "measured",
                 "meaning": "Somebody determined it experimentally.",
                 "cites": "the DOI of the study that measured it",
@@ -154,6 +160,7 @@ def scope_payload() -> dict[str, Any]:
         ],
         "n_reaction_templates": len(TEMPLATES),
         "providers": available_providers(),
+        "logbook": _logbook_payload(),
         "chemical_scope": [
             {"area": "Drug-like small molecules, kinase inhibitors, macrocycles", "status": "designed for this"},
             {"area": "Natural products, peptides, carbohydrates", "status": "works; drug-likeness rules less meaningful"},
@@ -171,6 +178,31 @@ def scope_payload() -> dict[str, Any]:
             "Every computational design needs experimental validation.",
         ],
     }
+
+
+def _logbook_payload() -> dict[str, Any]:
+    """What this lab has recorded. Reads the index, never the entry bodies."""
+    from ..logbook import recent, stats
+
+    try:
+        summary = stats()
+        return {
+            "n_entries": summary["n_entries"],
+            "by_outcome": summary["by_outcome"],
+            "failures_recorded": summary["failures_recorded"],
+            "with_structures": summary["with_structures"],
+            "median_yield_percent": summary.get("median_yield_percent"),
+            "date_range": summary.get("date_range"),
+            "projects": sorted(summary.get("by_project", {})),
+            "transforms": summary.get("by_transform", {}),
+            "recent": recent(6),
+            "why": (
+                "In-house results are the top evidence tier: they outrank published "
+                "precedent here, and they are the only record of what did not work."
+            ),
+        }
+    except Exception as exc:  # a broken logbook must not take the console down
+        return {"n_entries": 0, "error": f"{type(exc).__name__}: {exc}", "recent": []}
 
 
 def runtime_payload(provider: str | None = None) -> dict[str, Any]:

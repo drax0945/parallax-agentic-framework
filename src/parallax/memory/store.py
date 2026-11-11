@@ -632,9 +632,18 @@ _STORE: MemoryStore | None = None
 
 
 def store() -> MemoryStore:
+    """The store for the *current* workspace.
+
+    Keyed on the resolved root, not built once and kept. A module global that
+    ignored a later `PARALLAX_WORKSPACE` change meant anything switching
+    workspace mid-process — a test, a second console, a scripted run — silently
+    kept writing to the first one. That put test records in a real lab's
+    memory.
+    """
     global _STORE
-    if _STORE is None:
-        _STORE = MemoryStore()
+    root = settings().memory_dir
+    if _STORE is None or _STORE.root != root:
+        _STORE = MemoryStore(root=root)
     return _STORE
 
 
