@@ -418,6 +418,77 @@ def _summarise(payload: Any) -> str:
     return "returned " + ", ".join(keys)
 
 
+def add_logbook_entry(payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
+    """Record one experiment from the console. Returns (body, status).
+
+    Conditions arrive as a list of {key, value} pairs rather than an object so
+    the form can keep blank rows and preserve the order they were typed in.
+    Keys are passed through untouched: the logbook has no vocabulary.
+    """
+    from ..logbook import add, recent, stats
+
+    title = (payload.get("title") or "").strip()
+    outcome = (payload.get("outcome") or "").strip().lower()
+    if not title:
+        return {"error": "a title is required — say what was run"}, 400
+    if outcome not in {"success", "partial", "failure", "inconclusive"}:
+        return {"error": "outcome must be success, partial, failure or inconclusive"}, 400
+
+    conditions: dict[str, Any] = {}
+    for pair in payload.get("conditions") or []:
+        key = str(pair.get("key") or "").strip()
+        value = str(pair.get("value") or "").strip()
+        if key and value:
+            conditions[key] = value
+
+    date = (payload.get("date") or "").strip() or None
+    if date and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+        return {"error": f"date must be YYYY-MM-DD, got {date!r}"}, 400
+
+    yield_percent = payload.get("yield_percent")
+    if yield_percent in ("", None):
+        yield_percent = None
+    else:
+        try:
+            yield_percent = float(yield_percent)
+        except (TypeError, ValueError):
+            return {"error": "yield must be a number"}, 400
+
+    def clean(name: str) -> str | None:
+        return (str(payload.get(name) or "")).strip() or None
+
+    try:
+        result = add(
+            title=title,
+            outcome=outcome,
+            date=date,
+            reaction_smiles=clean("reaction_smiles"),
+            transform=clean("transform"),
+            operator=clean("operator"),
+            project=clean("project"),
+            scale=clean("scale"),
+            analysis=clean("analysis"),
+            observations=(payload.get("observations") or "").strip(),
+            yield_percent=yield_percent,
+            conditions=conditions,
+            tags=[t.strip() for t in (payload.get("tags") or "").split(",") if t.strip()],
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    except Exception as exc:  # noqa: BLE001 — a bad entry must not kill the console
+        return {"error": f"{type(exc).__name__}: {exc}"}, 500
+
+    return {
+        "ok": True,
+        "id": result["id"],
+        "summary": result["summary"],
+        "path": result["path"],
+        "note": result["note"],
+        "logbook": {**_logbook_payload(), "recent": recent(6)},
+        "n_entries": stats()["n_entries"],
+    }, 201
+
+
 # --- http ----------------------------------------------------------------
 
 
@@ -463,6 +534,32 @@ class Handler(BaseHTTPRequestHandler):
             )
         else:
             self._json({"error": "not found"}, 404)
+
+    def do_POST(self) -> None:  # noqa: N802
+        route = urlparse(self.path).path
+        if route != "/api/logbook":
+            self._json({"error": "not found"}, 404)
+            return
+
+        # The console binds to 127.0.0.1, but this is the one route that writes
+        # to disk, so it refuses a cross-origin caller rather than trusting the
+        # bind address alone.
+        origin = self.headers.get("Origin")
+        if origin and urlparse(origin).hostname not in ("127.0.0.1", "localhost"):
+            self._json({"error": "cross-origin writes are refused"}, 403)
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            if length > 256_000:
+                self._json({"error": "payload too large"}, 413)
+                return
+            payload = json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, TypeError) as exc:
+            self._json({"error": f"could not read the request: {exc}"}, 400)
+            return
+
+        self._json(*add_logbook_entry(payload))
 
     def _stream(self, question: str, provider: str) -> None:
         if not question.strip():

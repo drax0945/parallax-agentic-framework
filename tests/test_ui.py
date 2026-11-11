@@ -271,3 +271,85 @@ class TestStoresFollowTheWorkspace:
         settings.cache_clear()
         assert store().root == second / "memory"
         settings.cache_clear()
+
+
+class TestRecordingFromTheConsole:
+    """The Lab logbook tab writes; this is the endpoint behind it."""
+
+    def _ws(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PARALLAX_WORKSPACE", str(tmp_path))
+        from parallax.config import settings
+
+        settings.cache_clear()
+        return settings
+
+    def test_a_run_is_recorded_and_lands_on_disk(self, tmp_path, monkeypatch):
+        from parallax.ui.server import add_logbook_entry
+
+        settings = self._ws(tmp_path, monkeypatch)
+        body, status = add_logbook_entry(
+            {
+                "title": "Suzuki onto the core", "outcome": "failure",
+                "date": "2026-03-14", "operator": "RK", "scale": "12 g",
+                "transform": "Suzuki-Miyaura coupling",
+                "observations": "Protodeboronation dominated.",
+                "conditions": [{"key": "stir rate", "value": "600 rpm"}],
+            }
+        )
+        assert status == 201 and body["ok"]
+        written = (tmp_path / "logbook" / "entries").glob("*.md")
+        text = next(written).read_text(encoding="utf-8")
+        assert "stir rate: 600 rpm" in text  # key kept verbatim, space and all
+        assert body["logbook"]["n_entries"] == 1
+        assert body["logbook"]["recent"][0]["title"] == "Suzuki onto the core"
+        settings.cache_clear()
+
+    def test_blank_condition_rows_are_dropped(self, tmp_path, monkeypatch):
+        from parallax.logbook import store
+        from parallax.ui.server import add_logbook_entry
+
+        settings = self._ws(tmp_path, monkeypatch)
+        body, _ = add_logbook_entry(
+            {
+                "title": "x", "outcome": "success",
+                "conditions": [
+                    {"key": "solvent", "value": "DMF"},
+                    {"key": "", "value": "orphan"},
+                    {"key": "base", "value": ""},
+                ],
+            }
+        )
+        entry = store().get(body["id"])
+        assert entry.conditions == {"solvent": "DMF"}
+        settings.cache_clear()
+
+    def test_it_refuses_what_it_cannot_record(self, tmp_path, monkeypatch):
+        from parallax.ui.server import add_logbook_entry
+
+        settings = self._ws(tmp_path, monkeypatch)
+        for payload, fragment in [
+            ({"title": "", "outcome": "success"}, "title is required"),
+            ({"title": "x", "outcome": "worked fine"}, "outcome must be"),
+            ({"title": "x", "outcome": "success", "date": "14/03/2026"}, "YYYY-MM-DD"),
+            ({"title": "x", "outcome": "success", "yield_percent": "lots"}, "must be a number"),
+        ]:
+            body, status = add_logbook_entry(payload)
+            assert status == 400 and fragment in body["error"], payload
+        assert not list((tmp_path / "logbook" / "entries").glob("*.md"))
+        settings.cache_clear()
+
+    def test_an_empty_yield_is_not_zero(self, tmp_path, monkeypatch):
+        """A blank form field must not become a recorded 0% yield."""
+        from parallax.logbook import store
+        from parallax.ui.server import add_logbook_entry
+
+        settings = self._ws(tmp_path, monkeypatch)
+        body, _ = add_logbook_entry({"title": "x", "outcome": "success", "yield_percent": ""})
+        assert store().get(body["id"]).yield_percent is None
+        settings.cache_clear()
+
+    def test_the_page_has_the_form(self):
+        import pathlib
+
+        page = pathlib.Path("src/parallax/ui/index.html").read_text(encoding="utf-8")
+        assert "/api/logbook" in page and "Record it" in page
